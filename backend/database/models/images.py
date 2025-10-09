@@ -13,6 +13,7 @@ class Images(Base):
     )
     paper_id = Column(Integer, primary_key=True)
     question_no = Column(Integer, primary_key=True)
+    page_no = Column(Integer, primary_key=True)
     object_key = Column(String(255), nullable=False)
 
     __table_args__ = ForeignKeyConstraint(
@@ -20,5 +21,5 @@ class Images(Base):
         ["question_bank.paper_id", "question_bank.question_no"],
     )
 
-    workbook = relationship("StudentWorkbook", backref="images")
-    paper = relationship("QuestionBank", backref="images")
+    workbook = relationship("StudentWorkbook", backref="images_from_student")
+    paper = relationship("QuestionBank", backref="images_from_paper")
