@@ -14,8 +14,11 @@ class Users(Base):
 
 class UserCreate(BaseModel):
     password: str
+    mac_addr: str
     type: str
+
 
 class UserLogin(BaseModel):
     id: int
+    mac_addr: str
     password: str

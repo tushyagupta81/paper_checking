@@ -7,7 +7,8 @@ from database.database import Base
 class UserLog(Base):
     __tablename__ = "user_log"
 
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    id = Column(Integer, autoincrement=True, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mac_addr = Column(String(54), nullable=False)
     action = Column(String(255), nullable=False)
     time = Column(TIMESTAMP, nullable=False)
@@ -18,7 +19,8 @@ class UserLog(Base):
 class WorkbookLog(Base):
     __tablename__ = "workbook_log"
 
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    id = Column(Integer, autoincrement=True, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mac_addr = Column(String(54), nullable=False)
     action = Column(String(255), nullable=False)
     time = Column(TIMESTAMP, nullable=False)
