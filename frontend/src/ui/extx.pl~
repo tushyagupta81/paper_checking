@@ -1,0 +1,68 @@
+% Initial state: monkey is at the door, chair is at the window, banana and box are in the middle of the room.
+at(monkey, door).
+at(chair, window).
+at(box, center).
+at(banana, center).
+
+% Actions to move the monkey
+move(monkey, door, box) :- % Move to the box
+    at(monkey, door),
+    at(box, center).
+move(monkey, box, door) :- % Move back to the door
+    at(monkey, box),
+    at(box, center).
+move(monkey, box, window) :- % Climb the box and move to the window
+    at(monkey, box),
+    at(box, center),
+    at(chair, window).
+move(monkey, window, box) :- % Move back to the box from the window
+    at(monkey, window),
+    at(box, center),
+    at(chair, window).
+
+% Actions to push the box
+push(box, window) :- % Push the box to the window
+    at(box, center),
+    at(chair, window).
+push(box, center) :- % Push the box back to the center
+    at(box, window),
+    at(chair, window).
+
+% Define the goal state: monkey is holding the banana
+goal_state(State) :-
+    at(monkey, door),
+    at(banana, door),
+    State = [at(monkey, door), at(chair, _), at(box, _), at(banana, door)].
+
+% Define a predicate to solve the problem using a sequence of actions
+solve(State, Actions) :-
+    goal_state(State), % If the goal state is reached, no actions are needed
+    Actions = [].
+solve(State, [Action|Rest]) :-
+    move_object(Action), % Attempt to move an object (monkey or box)
+    update_state(State, Action, NewState), % Update the state
+    solve(NewState, Rest). % Recursively solve the rest of the problem
+
+% Helper predicate to move an object
+move_object(Action) :-
+    move(Action, _, _).
+move_object(Action) :-
+    push(Action, _).
+
+% Helper predicate to update the state after an action
+update_state([OldState|Rest], Action, [NewState|Rest]) :-
+    apply_action(OldState, Action, NewState).
+
+% Helper predicate to apply an action to a state
+apply_action([at(monkey, M), at(chair, C), at(box, B), at(banana, Ba)],
+    Action, [at(monkey, M1), at(chair, C1), at(box, B1), at(banana, Ba1)]) :-
+    update_object_position(Action, M, C, B, Ba, M1, C1, B1, Ba1).
+
+% Helper predicate to update the position of objects based on an action
+update_object_position(move(monkey, From, To), From, C, B, Ba, To, C, B, Ba).
+update_object_position(move(box, From, To), M, From, B, Ba, M, To, B, Ba).
+update_object_position(push(box, To), M, C, To, Ba, M, C, center, Ba).
+update_object_position(push(box, From), M, C, From, Ba, M, C, center, Ba).
+
+% Example query to find a sequence of actions to solve the problem
+% ?- solve([at(monkey, door), at(chair, window), at(box, center), at(banana, center)], Actions).

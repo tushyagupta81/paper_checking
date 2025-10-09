@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  my-react-app:
+    build: .
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/app  # Mount the project directory as a volume
+    command: npm run dev:react  # Start the development server with hot reloading
