@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from database.database import Base
+from database.models import *
 
 load_dotenv()
 

@@ -19,9 +19,11 @@ class Examiners(Base):
     paper_id = Column(Integer, primary_key=True)
     question_no = Column(Integer, primary_key=True)
 
-    __table_args__ = ForeignKeyConstraint(
-        ["paper_id", "question_no"],
-        ["question_bank.paper_id", "question_bank.question_no"],
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["paper_id", "question_no"],
+            ["question_bank.paper_id", "question_bank.question_no"],
+        ),
     )
 
     question_bank = relationship("QuestionBank", backref="examiners")

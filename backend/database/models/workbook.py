@@ -24,9 +24,11 @@ class WorkbookStatus(Base):
     question_no = Column(Integer, primary_key=True)
     checked = Column(Boolean, nullable=False, default=False)
 
-    __table_args__ = ForeignKeyConstraint(
-        ["paper_id", "question_no"],
-        ["question_bank.paper_id", "question_bank.question_no"],
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["paper_id", "question_no"],
+            ["question_bank.paper_id", "question_bank.question_no"],
+        ),
     )
 
     student = relationship("StudentWorkbook", backref="statuses")
@@ -45,9 +47,11 @@ class WorkbookMarking(Base):
     marks = Column(Integer, nullable=True)
     submit_time = Column(TIMESTAMP, nullable=True)
 
-    __table_args__ = ForeignKeyConstraint(
-        ["paper_id", "question_no"],
-        ["question_bank.paper_id", "question_bank.question_no"],
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["paper_id", "question_no"],
+            ["question_bank.paper_id", "question_bank.question_no"],
+        ),
     )
 
     student = relationship("StudentWorkbook", backref="workbook_marks_for_student")

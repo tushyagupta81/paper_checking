@@ -16,9 +16,11 @@ class Images(Base):
     page_no = Column(Integer, primary_key=True)
     object_key = Column(String(255), nullable=False)
 
-    __table_args__ = ForeignKeyConstraint(
-        ["paper_id", "question_no"],
-        ["question_bank.paper_id", "question_bank.question_no"],
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["paper_id", "question_no"],
+            ["question_bank.paper_id", "question_bank.question_no"],
+        ),
     )
 
     workbook = relationship("StudentWorkbook", backref="images_from_student")
