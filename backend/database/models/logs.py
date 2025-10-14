@@ -10,6 +10,7 @@ class UserLog(Base):
     id = Column(Integer, autoincrement=True, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mac_addr = Column(String(54), nullable=False)
+    ip_addr = Column(String(45), nullable=False)
     action = Column(String(255), nullable=False)
     time = Column(TIMESTAMP, nullable=False)
 
@@ -22,6 +23,7 @@ class WorkbookLog(Base):
     id = Column(Integer, autoincrement=True, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mac_addr = Column(String(54), nullable=False)
+    ip_addr = Column(String(45), nullable=False)
     action = Column(String(255), nullable=False)
     time = Column(TIMESTAMP, nullable=False)
     workbook_id = Column(

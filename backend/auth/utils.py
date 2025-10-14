@@ -1,13 +1,13 @@
-import bcrypt
+from pwdlib import PasswordHash
+
+password_hash = PasswordHash.recommended()
+
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    """Hash a password using pwdlib(argon2)"""
+    return password_hash.hash(password)
 
 
-def verify_password(plain_password: str, hashed: str) -> bool:
+def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash"""
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"),
-        hashed.encode("utf-8"),
-    )
+    return password_hash.verify(plain_password, hashed_password)
