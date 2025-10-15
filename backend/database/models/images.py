@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from sqlalchemy import (Column, ForeignKey, ForeignKeyConstraint, Integer,
                         String)
 from sqlalchemy.orm import relationship
@@ -25,3 +26,12 @@ class Images(Base):
 
     workbook = relationship("StudentWorkbook", backref="images_from_student")
     paper = relationship("QuestionBank", backref="images_from_paper")
+
+
+class GetImages(BaseModel):
+    workbook_id: int
+    paper_id: int
+    question_no: int
+    start_page_no: int
+    end_page_no: int
+    mac_addr: str

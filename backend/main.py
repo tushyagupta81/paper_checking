@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
-from fastapi import Depends, Security, FastAPI, HTTPException, Request, status
+from fastapi import (Depends, FastAPI, File, Form, HTTPException, Request,
+                     UploadFile, status)
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy.orm import Session
 
@@ -11,7 +12,10 @@ from auth.jwt_utils import (ACCESS_TOKEN_EXPIRE_MINUTES, Token,
                             create_access_token, get_current_user)
 from auth.utils import hash_password, verify_password
 from database.database import get_db
-from database.models import UserCreate, UserLog, UserLogin, Users
+from database.models import (AssignWorkbook, CreateQuestionPaper, GetImages,
+                             Images, QuestionBank, StudentWorkbook, UserCreate,
+                             UserLog, UserLogin, Users)
+from images.s3 import BUCKET_NAME, URL_EXPIRY, get_obj_name, s3
 
 
 def run_migrations():
@@ -54,9 +58,10 @@ def custom_openapi():
     return app.openapi_schema
 
 
-
 @app.post("/users/signup")
-async def create_user(user: UserCreate, request: Request, db: Session = Depends(get_db)):
+async def create_user(
+    user: UserCreate, request: Request, db: Session = Depends(get_db)
+):
     hashed_pw = hash_password(user.password)
     new_user = Users(password=hashed_pw, type=user.type)
     db.add(new_user)
@@ -110,9 +115,152 @@ async def login_for_access_token(
         raise invalid_cred
 
 
-@app.get("/temp")
-async def wow(curr_user: Users = Security(get_current_user)):
-    return curr_user.password
+@app.post("/images/upload")
+async def upload_image(
+    request: Request,
+    workbook_id: int = Form(...),
+    paper_id: int = Form(...),
+    question_no: int = Form(...),
+    page_no: int = Form(...),
+    file: UploadFile = File(...),
+    mac_addr: str = Form(...),
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    if not file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    object_name = get_obj_name(
+        workbook_id=workbook_id,
+        paper_id=paper_id,
+        question_no=question_no,
+        page_no=page_no,
+    )
+    file_data = await file.read()
+
+    try:
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key=object_name,
+            Body=file_data,
+            ContentType=file.content_type,
+        )
+        image_record = Images(
+            workbook_id=workbook_id,
+            paper_id=paper_id,
+            question_no=question_no,
+            page_no=page_no,
+            object_key=object_name,
+        )
+        db.add(image_record)
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=mac_addr,
+            ip_addr=ip_addr,
+            action="upload_image",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+        db.commit()
+        file_url = s3.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": BUCKET_NAME, "Key": object_name},
+            ExpiresIn=URL_EXPIRY,  # seconds
+        )
+        return {"message": "Upload successful", "url": file_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/questions/create")
+async def create_question_paper(
+    question_paper: CreateQuestionPaper,
+    request: Request,
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    qp = QuestionBank(
+        paper_id=question_paper.paper_id,
+        question_no=question_paper.question_no,
+        question=question_paper.question,
+        max_marks=question_paper.max_marks,
+    )
+    db.add(qp)
+    ip_addr = request.client.host if request.client is not None else ""
+    user_log = UserLog(
+        user_id=curr_user.id,
+        mac_addr=question_paper.mac_addr,
+        ip_addr=ip_addr,
+        action="create_question_paper",
+        time=datetime.now(),
+    )
+    db.add(user_log)
+    db.commit()
+    return {"message": "Paper created successfully"}
+
+
+@app.post("/users/workbook/assign")
+async def assign_workbook(
+    workbook: AssignWorkbook,
+    request: Request,
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    student_workbook = StudentWorkbook(
+        student_id=workbook.student_id,
+        workbook_id=workbook.workbook_id,
+    )
+    db.add(student_workbook)
+    ip_addr = request.client.host if request.client is not None else ""
+    user_log = UserLog(
+        user_id=curr_user.id,
+        mac_addr=workbook.mac_addr,
+        ip_addr=ip_addr,
+        action="assign_workbook",
+        time=datetime.now(),
+    )
+    db.add(user_log)
+    db.commit()
+    return {"message": "Assigned workbook to student"}
+
+
+@app.post("/images/get")
+async def get_images(
+    images: GetImages,
+    request: Request,
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    urls = {}
+    try:
+        for page_no in range(images.start_page_no, images.end_page_no + 1):
+            object_name = get_obj_name(
+                workbook_id=images.workbook_id,
+                paper_id=images.paper_id,
+                question_no=images.question_no,
+                page_no=page_no,
+            )
+            file_url = s3.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": BUCKET_NAME, "Key": object_name},
+                ExpiresIn=URL_EXPIRY,  # seconds
+            )
+            urls[page_no] = file_url
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    ip_addr = request.client.host if request.client is not None else ""
+    user_log = UserLog(
+        user_id=curr_user.id,
+        mac_addr=images.mac_addr,
+        ip_addr=ip_addr,
+        action="get_images",
+        time=datetime.now(),
+    )
+    db.add(user_log)
+    db.commit()
+    return {"urls": urls}
 
 
 app.openapi = custom_openapi

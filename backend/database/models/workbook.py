@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from sqlalchemy import (TIMESTAMP, Boolean, Column, ForeignKey,
                         ForeignKeyConstraint, Integer)
 from sqlalchemy.orm import backref, relationship
@@ -12,6 +13,12 @@ class StudentWorkbook(Base):
     workbook_id = Column(Integer, unique=True, nullable=False)
 
     student = relationship("Users", backref=backref("workbook", uselist=False))
+
+
+class AssignWorkbook(BaseModel):
+    student_id: int
+    workbook_id: int
+    mac_addr: str
 
 
 class WorkbookStatus(Base):
