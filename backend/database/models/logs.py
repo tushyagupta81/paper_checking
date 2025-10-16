@@ -27,7 +27,7 @@ class WorkbookLog(Base):
     action = Column(String(255), nullable=False)
     time = Column(TIMESTAMP, nullable=False)
     workbook_id = Column(
-        Integer, ForeignKey("student_workbook.workbook_id"), nullable=False
+        String(255), ForeignKey("student_workbook.workbook_id"), nullable=False
     )
     question_no = Column(Integer, nullable=True)
     old_val = Column(Integer, nullable=True)

@@ -12,10 +12,11 @@ from auth.jwt_utils import (ACCESS_TOKEN_EXPIRE_MINUTES, Token,
                             create_access_token, get_current_user)
 from auth.utils import hash_password, verify_password
 from database.database import get_db
-from database.models import (AssignWorkbook, CreateQuestionPaper, GetImages,
-                             Images, QuestionBank, StudentWorkbook, UserCreate,
-                             UserLog, UserLogin, Users)
-from images.s3 import BUCKET_NAME, URL_EXPIRY, get_obj_name, s3
+from database.models import (AssignWorkbook, GetImages, Images, QuestionBank,
+                             StudentWorkbook, UserCreate, UserLog, UserLogin,
+                             Users)
+from images.s3 import (BUCKET_NAME, URL_EXPIRY, get_obj_name,
+                       get_question_object_name, s3)
 
 
 def run_migrations():
@@ -118,8 +119,7 @@ async def login_for_access_token(
 @app.post("/images/upload")
 async def upload_image(
     request: Request,
-    workbook_id: int = Form(...),
-    paper_id: int = Form(...),
+    workbook_id: str = Form(...),
     question_no: int = Form(...),
     page_no: int = Form(...),
     file: UploadFile = File(...),
@@ -130,6 +130,16 @@ async def upload_image(
     if not file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
         raise HTTPException(status_code=400, detail="Invalid file type")
 
+    paper_id = (
+        db.query(StudentWorkbook)
+        .filter(StudentWorkbook.workbook_id == workbook_id)
+        .first()
+    )
+    if paper_id is None:
+        raise HTTPException(
+            status_code=500, detail="Unable to find paper_id for workbook"
+        )
+    paper_id = str(paper_id.paper_id)
     object_name = get_obj_name(
         workbook_id=workbook_id,
         paper_id=paper_id,
@@ -147,7 +157,6 @@ async def upload_image(
         )
         image_record = Images(
             workbook_id=workbook_id,
-            paper_id=paper_id,
             question_no=question_no,
             page_no=page_no,
             object_key=object_name,
@@ -175,22 +184,36 @@ async def upload_image(
 
 @app.post("/questions/create")
 async def create_question_paper(
-    question_paper: CreateQuestionPaper,
     request: Request,
+    paper_id: str = Form(...),
+    question_no: int = Form(...),
+    max_marks: int = Form(...),
+    file: UploadFile = File(...),
+    mac_addr: str = Form(...),
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
+    question_object_key = get_question_object_name(
+        paper_id=paper_id, question_no=question_no
+    )
+    file_data = await file.read()
+    s3.put_object(
+        Bucket=BUCKET_NAME,
+        Key=question_object_key,
+        Body=file_data,
+        ContentType=file.content_type,
+    )
     qp = QuestionBank(
-        paper_id=question_paper.paper_id,
-        question_no=question_paper.question_no,
-        question=question_paper.question,
-        max_marks=question_paper.max_marks,
+        paper_id=paper_id,
+        question_no=question_no,
+        question_key=question_object_key,
+        max_marks=max_marks,
     )
     db.add(qp)
     ip_addr = request.client.host if request.client is not None else ""
     user_log = UserLog(
         user_id=curr_user.id,
-        mac_addr=question_paper.mac_addr,
+        mac_addr=mac_addr,
         ip_addr=ip_addr,
         action="create_question_paper",
         time=datetime.now(),
@@ -210,6 +233,7 @@ async def assign_workbook(
     student_workbook = StudentWorkbook(
         student_id=workbook.student_id,
         workbook_id=workbook.workbook_id,
+        paper_id=workbook.paper_id,
     )
     db.add(student_workbook)
     ip_addr = request.client.host if request.client is not None else ""
@@ -234,19 +258,21 @@ async def get_images(
 ):
     urls = {}
     try:
-        for page_no in range(images.start_page_no, images.end_page_no + 1):
-            object_name = get_obj_name(
-                workbook_id=images.workbook_id,
-                paper_id=images.paper_id,
-                question_no=images.question_no,
-                page_no=page_no,
+        image_keys = (
+            db.query(Images)
+            .filter(
+                Images.workbook_id == images.workbook_id,
+                Images.question_no == images.question_no,
             )
+            .all()
+        )
+        for image_key in image_keys:
             file_url = s3.generate_presigned_url(
                 ClientMethod="get_object",
-                Params={"Bucket": BUCKET_NAME, "Key": object_name},
+                Params={"Bucket": BUCKET_NAME, "Key": image_key.object_key},
                 ExpiresIn=URL_EXPIRY,  # seconds
             )
-            urls[page_no] = file_url
+            urls[image_key.page_no] = file_url
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

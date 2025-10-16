@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from sqlalchemy import Column, ForeignKey, ForeignKeyConstraint, Integer, Text
+from sqlalchemy import (Boolean, Column, ForeignKey, ForeignKeyConstraint,
+                        Integer, String)
 from sqlalchemy.orm import relationship
 
 from database.database import Base
@@ -8,25 +8,18 @@ from database.database import Base
 class QuestionBank(Base):
     __tablename__ = "question_bank"
 
-    paper_id = Column(Integer, primary_key=True)
+    paper_id = Column(String(255), primary_key=True)
     question_no = Column(Integer, primary_key=True)
     max_marks = Column(Integer, nullable=False)
-    question = Column(Text, nullable=False)
-
-
-class CreateQuestionPaper(BaseModel):
-    paper_id: int
-    question_no: int
-    question: str
-    max_marks: int
-    mac_addr: str
+    question_key = Column(String(255), nullable=False)
+    active = Column(Boolean, default=True)
 
 
 class Examiners(Base):
     __tablename__ = "examiners"
 
     examiner_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    paper_id = Column(Integer, primary_key=True)
+    paper_id = Column(String(255), primary_key=True)
     question_no = Column(Integer, primary_key=True)
 
     __table_args__ = (
