@@ -12,9 +12,6 @@ class StudentWorkbook(Base):
     workbook_id = Column(String(255), unique=True, nullable=False)
     paper_id = Column(String(255), ForeignKey("question_bank.paper_id"), nullable=False)
 
-    student = relationship("Users", backref=backref("workbook", uselist=False))
-    paper = relationship("QuestionBank", backref="workbooks")
-
 
 class AssignWorkbook(BaseModel):
     student_id: int

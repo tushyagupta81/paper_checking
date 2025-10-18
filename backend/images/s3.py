@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import boto3
 
 s3 = boto3.client(
@@ -17,10 +19,12 @@ except s3.exceptions.BucketAlreadyOwnedByYou:
 
 
 def get_obj_name(workbook_id: str, paper_id: str, question_no: int, page_no: int):
-    object_name = f"answer_sheet_{workbook_id}_{paper_id}_{question_no}_{page_no}"
+    object_name = (
+        f"answer_sheet_{workbook_id}_{paper_id}_{question_no}_{page_no}_{str(uuid4())}"
+    )
     return object_name
 
 
 def get_question_object_name(paper_id: str, question_no: int):
-    object_name = f"question_{paper_id}_{question_no}"
+    object_name = f"question_{paper_id}_{question_no}_{str(uuid4())}"
     return object_name

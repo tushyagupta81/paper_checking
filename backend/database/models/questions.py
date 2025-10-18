@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 from sqlalchemy import (Boolean, Column, ForeignKey, ForeignKeyConstraint,
                         Integer, String)
 from sqlalchemy.orm import relationship
@@ -30,4 +31,11 @@ class Examiners(Base):
     )
 
     question_bank = relationship("QuestionBank", backref="examiners")
-    user = relationship("Users", backref="examiners")
+    # user = relationship("Users", backref="examiners")
+
+
+class AssignExaminer(BaseModel):
+    id: int
+    mac_addr: str
+    paper_id: str
+    question_no: int

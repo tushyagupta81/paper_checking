@@ -12,9 +12,10 @@ from auth.jwt_utils import (ACCESS_TOKEN_EXPIRE_MINUTES, Token,
                             create_access_token, get_current_user)
 from auth.utils import hash_password, verify_password
 from database.database import get_db
-from database.models import (AssignWorkbook, GetImages, Images, QuestionBank,
-                             StudentWorkbook, UserCreate, UserLog, UserLogin,
-                             Users)
+from database.models import (AssignExaminer, AssignWorkbook, Examiners,
+                             GetImages, Images, QuestionBank, StudentWorkbook,
+                             UserCreate, UserLog, UserLogin, Users,
+                             WorkbookMarking, WorkbookStatus)
 from images.s3 import (BUCKET_NAME, URL_EXPIRY, get_obj_name,
                        get_question_object_name, s3)
 
@@ -63,20 +64,25 @@ def custom_openapi():
 async def create_user(
     user: UserCreate, request: Request, db: Session = Depends(get_db)
 ):
-    hashed_pw = hash_password(user.password)
-    new_user = Users(password=hashed_pw, type=user.type)
-    db.add(new_user)
-    db.flush()
-    ip_addr = request.client.host if request.client is not None else ""
-    user_log = UserLog(
-        user_id=new_user.id,
-        mac_addr=user.mac_addr,
-        ip_addr=ip_addr,
-        action="signup",
-        time=datetime.now(),
-    )
-    db.add(user_log)
-    db.commit()
+    try:
+        hashed_pw = hash_password(user.password)
+        new_user = Users(password=hashed_pw, type=user.type)
+        db.add(new_user)
+        db.flush()
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=new_user.id,
+            mac_addr=user.mac_addr,
+            ip_addr=ip_addr,
+            action="signup",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, detail=f"While Creating new user: {e}")
+
     db.refresh(new_user)
     return {"message": "User created", "id": new_user.id}
 
@@ -112,6 +118,7 @@ async def login_for_access_token(
         db.commit()
         return Token(access_token=access_token, token_type="bearer")
     except Exception as e:
+        db.rollback()
         print(e)
         raise invalid_cred
 
@@ -179,6 +186,7 @@ async def upload_image(
         )
         return {"message": "Upload successful", "url": file_url}
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -193,34 +201,67 @@ async def create_question_paper(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
-    question_object_key = get_question_object_name(
-        paper_id=paper_id, question_no=question_no
-    )
-    file_data = await file.read()
-    s3.put_object(
-        Bucket=BUCKET_NAME,
-        Key=question_object_key,
-        Body=file_data,
-        ContentType=file.content_type,
-    )
-    qp = QuestionBank(
-        paper_id=paper_id,
-        question_no=question_no,
-        question_key=question_object_key,
-        max_marks=max_marks,
-    )
-    db.add(qp)
-    ip_addr = request.client.host if request.client is not None else ""
-    user_log = UserLog(
-        user_id=curr_user.id,
-        mac_addr=mac_addr,
-        ip_addr=ip_addr,
-        action="create_question_paper",
-        time=datetime.now(),
-    )
-    db.add(user_log)
-    db.commit()
+    try:
+        question_object_key = get_question_object_name(
+            paper_id=paper_id, question_no=question_no
+        )
+        file_data = await file.read()
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key=question_object_key,
+            Body=file_data,
+            ContentType=file.content_type,
+        )
+        qp = QuestionBank(
+            paper_id=paper_id,
+            question_no=question_no,
+            question_key=question_object_key,
+            max_marks=max_marks,
+        )
+        db.add(qp)
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=mac_addr,
+            ip_addr=ip_addr,
+            action="create_question_paper",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+        db.commit()
+    except Exception as e:
+        raise HTTPException(500, detail=f"While creating question paper: {e}")
     return {"message": "Paper created successfully"}
+
+
+@app.post("/users/examiner/assign")
+async def assign_examiner(
+    examiner: AssignExaminer,
+    request: Request,
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    try:
+        examiner_question = Examiners(
+            examiner_id=examiner.id,
+            paper_id=examiner.paper_id,
+            question_no=examiner.question_no,
+        )
+        db.add(examiner_question)
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=examiner.mac_addr,
+            ip_addr=ip_addr,
+            action="assign_examiner",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, detail=f"While commiting in assign workbook: {e}")
+    return {"message": "Assigned question to examiner"}
 
 
 @app.post("/users/workbook/assign")
@@ -230,22 +271,40 @@ async def assign_workbook(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
-    student_workbook = StudentWorkbook(
-        student_id=workbook.student_id,
-        workbook_id=workbook.workbook_id,
-        paper_id=workbook.paper_id,
-    )
-    db.add(student_workbook)
-    ip_addr = request.client.host if request.client is not None else ""
-    user_log = UserLog(
-        user_id=curr_user.id,
-        mac_addr=workbook.mac_addr,
-        ip_addr=ip_addr,
-        action="assign_workbook",
-        time=datetime.now(),
-    )
-    db.add(user_log)
-    db.commit()
+    try:
+        student_workbook = StudentWorkbook(
+            student_id=workbook.student_id,
+            workbook_id=workbook.workbook_id,
+            paper_id=workbook.paper_id,
+        )
+        print(student_workbook.user)
+        # db.add(student_workbook)
+        # ip_addr = request.client.host if request.client is not None else ""
+        # user_log = UserLog(
+        #     user_id=curr_user.id,
+        #     mac_addr=workbook.mac_addr,
+        #     ip_addr=ip_addr,
+        #     action="assign_workbook",
+        #     time=datetime.now(),
+        # )
+        # db.add(user_log)
+        # questions = (
+        #     db.query(QuestionBank)
+        #     .with_entities(QuestionBank.question_no)
+        #     .filter_by(paper_id=workbook.paper_id)
+        #     .all()
+        # )
+        # for q in questions:
+        #     workbook_status = WorkbookStatus(
+        #         workbook_id=workbook.workbook_id,
+        #         question_no=q,
+        #         checked=False,
+        #     )
+        #     db.add(workbook_status)
+        # db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, detail=f"While commiting in assign workbook: {e}")
     return {"message": "Assigned workbook to student"}
 
 
@@ -273,19 +332,25 @@ async def get_images(
                 ExpiresIn=URL_EXPIRY,  # seconds
             )
             urls[image_key.page_no] = file_url
+        workbook_marking = WorkbookMarking(
+            workbook_id=images.workbook_id,
+            question_no=images.question_no,
+            open_time=datetime.now(),
+        )
+        db.add(workbook_marking)
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=images.mac_addr,
+            ip_addr=ip_addr,
+            action="get_images",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+        db.commit()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    ip_addr = request.client.host if request.client is not None else ""
-    user_log = UserLog(
-        user_id=curr_user.id,
-        mac_addr=images.mac_addr,
-        ip_addr=ip_addr,
-        action="get_images",
-        time=datetime.now(),
-    )
-    db.add(user_log)
-    db.commit()
+        db.rollback()
+        raise HTTPException(500, detail=f"While in get images: {e}")
     return {"urls": urls}
 
 
