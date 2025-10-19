@@ -84,7 +84,7 @@ def create_question_bank(n=10):
                 "mac_addr": MAC_ADDR,
             }
             res = requests.post(
-                "http://localhost:8000/questions/create",
+                "http://localhost:8000/question/create",
                 headers={
                     "Authorization": f"Bearer {JWT}",
                 },
