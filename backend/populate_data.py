@@ -122,7 +122,7 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
                     print(res.text)
 
 
-num_students = 10
+num_students = int(input("Number of students: "))
 student_ids = create_students(num_students)
 papers = create_question_bank(num_students)
 workbooks = assign_workbooks(student_ids, papers)

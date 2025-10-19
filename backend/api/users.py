@@ -114,6 +114,15 @@ async def assign_workbook(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
+    if str(curr_user.type) != "admin":
+        raise HTTPException(403, detail="Only admins can assign workbooks to students")
+    student = db.query(Users).with_entities(Users.type).filter_by(id=workbook.student_id).all()
+    if len(student) == 0:
+        raise  HTTPException(404, detail="Student does not exist")
+    student = student[0]
+    if str(student[0]) != "student":
+        raise HTTPException(403, detail="Only students can be assigned a workbook")
+
     try:
         student_workbook = StudentWorkbook(
             student_id=workbook.student_id,
@@ -136,10 +145,11 @@ async def assign_workbook(
             .filter_by(paper_id=workbook.paper_id)
             .all()
         )
+        print(questions)
         for q in questions:
             workbook_status = WorkbookStatus(
                 workbook_id=workbook.workbook_id,
-                question_no=q,
+                question_no=q[0],
                 checked=False,
             )
             db.add(workbook_status)

@@ -5,6 +5,7 @@ from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
 from sqlalchemy.orm import Session
 
 from auth.jwt_utils import get_current_user
+from utils.mac_addr_type import MacAddress
 from database.database import get_db
 from database.models import (GetImages, Images, StudentWorkbook, UserLog,
                              Users, WorkbookMarking)
@@ -20,7 +21,7 @@ async def upload_image(
     question_no: int = Form(...),
     page_no: int = Form(...),
     file: UploadFile = File(...),
-    mac_addr: str = Form(...),
+    mac_addr: MacAddress = Form(...),
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):

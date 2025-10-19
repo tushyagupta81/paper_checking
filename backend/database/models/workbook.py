@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from utils.mac_addr_type import MacAddress
 from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, String
 from sqlalchemy.orm import backref, relationship
 
@@ -17,7 +18,7 @@ class AssignWorkbook(BaseModel):
     student_id: int
     workbook_id: str
     paper_id: str
-    mac_addr: str
+    mac_addr: MacAddress
 
 
 class WorkbookStatus(Base):

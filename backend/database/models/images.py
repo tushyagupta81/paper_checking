@@ -3,6 +3,7 @@ from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from database.database import Base
+from utils.mac_addr_type import MacAddress
 
 
 class Images(Base):
@@ -11,9 +12,7 @@ class Images(Base):
     workbook_id = Column(
         String(255), ForeignKey("student_workbook.workbook_id"), primary_key=True
     )
-    question_no = Column(
-        Integer, primary_key=True
-    )
+    question_no = Column(Integer, primary_key=True)
     page_no = Column(Integer, primary_key=True)
     object_key = Column(String(255), nullable=False)
 
@@ -23,4 +22,4 @@ class Images(Base):
 class GetImages(BaseModel):
     workbook_id: str
     question_no: int
-    mac_addr: str
+    mac_addr: MacAddress

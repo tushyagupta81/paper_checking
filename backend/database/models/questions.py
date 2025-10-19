@@ -4,6 +4,7 @@ from sqlalchemy import (Boolean, Column, ForeignKey, ForeignKeyConstraint,
 from sqlalchemy.orm import relationship
 
 from database.database import Base
+from utils.mac_addr_type import MacAddress
 
 
 class QuestionBank(Base):
@@ -36,6 +37,6 @@ class Examiners(Base):
 
 class AssignExaminer(BaseModel):
     id: int
-    mac_addr: str
+    mac_addr: MacAddress
     paper_id: str
     question_no: int
