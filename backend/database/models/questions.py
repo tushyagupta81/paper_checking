@@ -40,3 +40,7 @@ class AssignExaminer(BaseModel):
     mac_addr: MacAddress
     paper_id: str
     question_no: int
+
+
+class UnassignedExaminers(BaseModel):
+    mac_addr: MacAddress
