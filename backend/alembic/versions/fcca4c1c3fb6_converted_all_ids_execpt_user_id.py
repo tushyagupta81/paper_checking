@@ -47,7 +47,7 @@ def upgrade() -> None:
     sa.Column('student_id', sa.Integer(), nullable=False),
     sa.Column('workbook_id', sa.String(length=255), nullable=False),
     sa.Column('paper_id', sa.String(length=255), nullable=False),
-    sa.ForeignKeyConstraint(['paper_id'], ['question_bank.paper_id'], ),
+    # sa.ForeignKeyConstraint(['paper_id'], ['question_bank.paper_id'], ),
     sa.ForeignKeyConstraint(['student_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('student_id'),
     sa.UniqueConstraint('workbook_id')
