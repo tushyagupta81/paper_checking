@@ -11,7 +11,7 @@ class StudentWorkbook(Base):
 
     student_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     workbook_id = Column(String(255), unique=True, nullable=False)
-    paper_id = Column(String(255), ForeignKey("question_bank.paper_id"), nullable=False)
+    paper_id = Column(String(255), nullable=False)
 
 
 class AssignWorkbook(BaseModel):

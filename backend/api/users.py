@@ -167,6 +167,11 @@ async def assign_workbook(
     if str(student[0]) != "student":
         raise HTTPException(403, detail="Only students can be assigned a workbook")
 
+    paper_ids = db.query(QuestionBank).with_entities(QuestionBank.paper_id).all()
+    paper_ids = set([x[0] for x in paper_ids])
+    if workbook.paper_id not in paper_ids:
+        raise HTTPException(404, detail="Paper id does not exist")
+
     try:
         student_workbook = StudentWorkbook(
             student_id=workbook.student_id,
