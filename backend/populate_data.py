@@ -12,23 +12,55 @@ random_images = [
     for file in os.listdir(image_dir)
     if file.endswith(".jpg")
 ]
+PASSWORD = "Tushya@123"
 
 
 def get_token():
-    id = int(input("Enter id: "))
-    password = str(input("Enter password: "))
+    # id = int(input("Enter id: "))
+    # password = str(input("Enter password: "))
+
+    admin_id = requests.post(
+        "http://localhost:8000/users/signup",
+        json={
+            "password": PASSWORD,
+            "mac_addr": MAC_ADDR,
+            "type": "admin",
+        },
+    )
+    admin_id = admin_id.json()["id"]
+    examiner_id = requests.post(
+        "http://localhost:8000/users/signup",
+        json={
+            "password": PASSWORD,
+            "mac_addr": MAC_ADDR,
+            "type": "examiner",
+        },
+    )
+    examiner_id = examiner_id.json()["id"]
+
     res = requests.post(
         "http://localhost:8000/users/login",
         json={
-            "id": id,
-            "password": password,
+            "id": admin_id,
+            "password": PASSWORD,
             "mac_addr": MAC_ADDR,
         },
     )
-    return res.json()["access_token"]
+    admin_token = res.json()["access_token"]
+    res = requests.post(
+        "http://localhost:8000/users/login",
+        json={
+            "id": examiner_id,
+            "password": PASSWORD,
+            "mac_addr": MAC_ADDR,
+        },
+    )
+    examiner_token = res.json()["access_token"]
+
+    return admin_id, admin_token, examiner_id, examiner_token
 
 
-JWT = get_token()
+ADMIN_ID, ADMIN_JWT, EXAMINER_ID, EXAMINER_JWT = get_token()
 
 
 def create_students(n=10):
@@ -37,12 +69,13 @@ def create_students(n=10):
         res = requests.post(
             "http://localhost:8000/users/signup",
             json={
-                "password": "hello world",
+                "password": PASSWORD,
                 "mac_addr": MAC_ADDR,
                 "type": "student",
             },
         )
         ids.append(res.json()["id"])
+        print(f"Created student: {ids[-1]}, {res.json()}")
     return ids
 
 
@@ -57,14 +90,17 @@ def assign_workbooks(student_ids: list[int], papers: dict[str, list]):
             "paper_id": random.choice(list(papers.keys())),
         }
         res = requests.post(
-            "http://localhost:8000/users/workbook/assign",
+            "http://localhost:8000/users/student/assign",
             json=json_data,
             headers={
-                "Authorization": f"Bearer {JWT}",
+                "Authorization": f"Bearer {ADMIN_JWT}",
             },
         )
         if res.status_code == 200:
             workbooks[workbook_id] = json_data["paper_id"]
+            print(f"Created {workbook_id=}")
+        else:
+            print(res.json())
 
     return workbooks
 
@@ -86,12 +122,16 @@ def create_question_bank(n=10):
             res = requests.post(
                 "http://localhost:8000/question/create",
                 headers={
-                    "Authorization": f"Bearer {JWT}",
+                    "Authorization": f"Bearer {ADMIN_JWT}",
                 },
                 data=data,
                 files={"file": (file_path, open(file_path, "rb"), "image/jpeg")},
             )
-            paper_ids[paper_id].append((data["question_no"], data["max_marks"]))
+            if res.status_code == 200:
+                paper_ids[paper_id].append((data["question_no"], data["max_marks"]))
+            else:
+                print(f"Error: {res.json()}")
+        print(f"Create {paper_id=}, with {[d for d in paper_ids[paper_id]]}")
 
     return paper_ids
 
@@ -107,7 +147,7 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
                 res = requests.post(
                     "http://localhost:8000/images/upload",
                     headers={
-                        "Authorization": f"Bearer {JWT}",
+                        "Authorization": f"Bearer {ADMIN_JWT}",
                     },
                     data={
                         "workbook_id": workbook_id,
@@ -120,6 +160,7 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
                 page_no += 1
                 if res.status_code != 200:
                     print(res.text)
+                print(f"Uploaded {workbook_id=}, question={question + 1}, {page_no=}")
 
 
 num_students = int(input("Number of students: "))
