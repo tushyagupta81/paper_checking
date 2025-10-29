@@ -25,6 +25,8 @@ async def upload_image(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
+    # if str(curr_user.type) != "admin":
+    #     raise HTTPException(403, detail="Only admins can upload images")
     if not file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
         raise HTTPException(status_code=400, detail="Invalid file type")
 
@@ -88,6 +90,8 @@ async def get_images(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
+    if str(curr_user.type) != "examiner":
+        raise HTTPException(403, detail="Only examiners can fetch workbook images")
     urls = {}
     try:
         image_keys = (

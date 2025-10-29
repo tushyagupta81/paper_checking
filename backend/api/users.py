@@ -9,7 +9,7 @@ from auth.utils import hash_password, verify_password
 from database.database import get_db
 from database.models import (AssignExaminer, AssignWorkbook, Examiners,
                              QuestionBank, StudentWorkbook, UserCreate,
-                             UserLog, UserLogin, Users, WorkbookStatus)
+                             UserLog, UserLogin, Users, WorkbookStatus, UnassignedExaminers)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -77,6 +77,43 @@ async def login_for_access_token(
         raise invalid_cred
 
 
+@router.post("/examiner/unassigned")
+async def get_unassigned_examiners(
+    examiner: UnassignedExaminers,
+    request: Request,
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    if str(curr_user.type) != "admin":
+        raise HTTPException(403, detail="Only admins can get unassigned examiners")
+    try:
+        subq = db.query(Examiners.examiner_id)
+        examiners = (
+            db.query(Users)
+            .with_entities(Users.id)
+            .filter(Users.type == "examiner")
+            .filter(~Users.id.in_(subq))
+            .all()
+        )
+        examiners = [x[0] for x in examiners]
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=examiner.mac_addr,
+            ip_addr=ip_addr,
+            action="get_unassigned_examiners",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            500, detail=f"While commiting in get unassigned examiners: {e}"
+        )
+    return {"examiners": examiners}
+
+
 @router.post("/examiner/assign")
 async def assign_examiner(
     examiner: AssignExaminer,
@@ -84,6 +121,8 @@ async def assign_examiner(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
+    if str(curr_user.type) != "admin":
+        raise HTTPException(403, detail="Only admins can assign questions to examiner")
     try:
         examiner_question = Examiners(
             examiner_id=examiner.id,
@@ -116,12 +155,22 @@ async def assign_workbook(
 ):
     if str(curr_user.type) != "admin":
         raise HTTPException(403, detail="Only admins can assign workbooks to students")
-    student = db.query(Users).with_entities(Users.type).filter_by(id=workbook.student_id).all()
+    student = (
+        db.query(Users)
+        .with_entities(Users.type)
+        .filter_by(id=workbook.student_id)
+        .all()
+    )
     if len(student) == 0:
-        raise  HTTPException(404, detail="Student does not exist")
+        raise HTTPException(404, detail="Student does not exist")
     student = student[0]
     if str(student[0]) != "student":
         raise HTTPException(403, detail="Only students can be assigned a workbook")
+
+    paper_ids = db.query(QuestionBank).with_entities(QuestionBank.paper_id).all()
+    paper_ids = set([x[0] for x in paper_ids])
+    if workbook.paper_id not in paper_ids:
+        raise HTTPException(404, detail="Paper id does not exist")
 
     try:
         student_workbook = StudentWorkbook(

@@ -25,6 +25,8 @@ async def create_question_paper(
     db: Session = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
+    if str(curr_user.type) != "admin":
+        raise HTTPException(403, detail="Only admins can create a question paper")
     try:
         question_object_key = get_question_object_name(
             paper_id=paper_id, question_no=question_no
