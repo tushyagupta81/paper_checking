@@ -8,8 +8,9 @@ from auth.jwt_utils import (ACCESS_TOKEN_EXPIRE_MINUTES, Token,
 from auth.utils import hash_password, verify_password
 from database.database import get_db
 from database.models import (AssignExaminer, AssignWorkbook, Examiners,
-                             QuestionBank, StudentWorkbook, UserCreate,
-                             UserLog, UserLogin, Users, WorkbookStatus, UnassignedExaminers)
+                             QuestionBank, StudentWorkbook,
+                             UnassignedExaminers, UserCreate, UserLog,
+                             UserLogin, Users, WorkbookStatus)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -20,6 +21,7 @@ async def create_user(
 ):
     try:
         hashed_pw = hash_password(user.password)
+        print(user.type)
         new_user = Users(password=hashed_pw, type=user.type)
         db.add(new_user)
         db.flush()
@@ -44,7 +46,7 @@ async def create_user(
 @router.post("/login")
 async def login_for_access_token(
     user: UserLogin, request: Request, db: Session = Depends(get_db)
-) -> Token:
+):
     invalid_cred = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Incorrect user_id or password",
@@ -70,7 +72,10 @@ async def login_for_access_token(
         )
         db.add(user_log)
         db.commit()
-        return Token(access_token=access_token, token_type="bearer")
+        return {
+            "token": Token(access_token=access_token, token_type="bearer"),
+            "user_type": db_user.type,
+        }
     except Exception as e:
         db.rollback()
         print(e)
