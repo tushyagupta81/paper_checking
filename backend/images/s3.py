@@ -1,12 +1,13 @@
+import os
 from uuid import uuid4
 
 import boto3
 
 s3 = boto3.client(
     "s3",
-    endpoint_url="http://localhost:9000",
-    aws_access_key_id="minioadmin",
-    aws_secret_access_key="minioadmin123",
+    endpoint_url=os.environ.get("MINIO_ENDPOINT"),
+    aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
+    aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
 )
 
 BUCKET_NAME = "images"

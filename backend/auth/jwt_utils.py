@@ -61,7 +61,7 @@ async def get_current_user(
             raise credentials_exception
         _ = TokenData(user_id=user_id)
     except Exception as e:
-        print(e)
+        print(f"Error: {e}")
         raise credentials_exception
     user = db.query(Users).filter(Users.id == user_id).first()
     if user is None:

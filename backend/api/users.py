@@ -21,7 +21,6 @@ async def create_user(
 ):
     try:
         hashed_pw = hash_password(user.password)
-        print(user.type)
         new_user = Users(password=hashed_pw, type=user.type)
         db.add(new_user)
         db.flush()
@@ -78,7 +77,6 @@ async def login_for_access_token(
         }
     except Exception as e:
         db.rollback()
-        print(e)
         raise invalid_cred
 
 
@@ -199,7 +197,6 @@ async def assign_workbook(
             .filter_by(paper_id=workbook.paper_id)
             .all()
         )
-        print(questions)
         for q in questions:
             workbook_status = WorkbookStatus(
                 workbook_id=workbook.workbook_id,
