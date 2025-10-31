@@ -6,11 +6,12 @@ import requests
 
 MAC_ADDR = "12:12:12:12:12:12"
 paper_code = ["ASX", "ABC", "ASM", "CAL"]
-image_dir = r"C:\Users\verma\Downloads"
+# image_dir = r"C:\Users\verma\Downloads"
+image_dir = f"{os.environ.get("HOME")}/Downloads"
 random_images = [
     os.path.join(image_dir, file)
     for file in os.listdir(image_dir)
-    if file.endswith(".jpg")
+    if file.endswith(".jpg") or file.endswith(".png") 
 ]
 PASSWORD = "Tushya@123"
 
