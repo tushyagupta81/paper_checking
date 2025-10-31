@@ -8,22 +8,27 @@ import EvaluatorDashboard from './Components/EvaluatorDashboard';
 import UserDashboard from './Components/UserDashboard';
 import ReportsPage from './Components/ReportsPage';
 import EvaluationPage from './Components/EvaluationPage';
+import api from "./api.js";
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('');
+  const [userData, setUserData] = useState(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorage('sidebarCollapsed', false);
   const [currentPage, setCurrentPage] = useState('dashboard');
 
-  const handleLogin = (role) => {
+  const handleLogin = (role, data) => {
     setIsLoggedIn(true);
     setUserRole(role);
+    setUserData(data);
     setCurrentPage('dashboard');
   };
 
   const handleLogout = () => {
+    api.clearToken();
     setIsLoggedIn(false);
     setUserRole('');
+    setUserData(null);
     setCurrentPage('');
   };
 
@@ -34,18 +39,18 @@ export default function App() {
   const renderContent = () => {
     switch (currentPage) {
       case 'dashboard':
-        if (userRole === 'admin') return <AdminDashboard />;
-        if (userRole === 'evaluator') return <EvaluatorDashboard />;
-        if (userRole === 'user') return <UserDashboard />;
+        if (userRole === 'admin') return <AdminDashboard userData={userData} />;
+        if (userRole === 'examiner') return <EvaluatorDashboard userData={userData} />;
+        if (userRole === 'user') return <UserDashboard userData={userData} />;
         break;
 
       case 'assignment':
-        return userRole === 'evaluator'
-          ? <EvaluationPage />
+        return userRole === 'examiner'
+          ? <EvaluationPage userData={userData} />
           : <div className="p-8 text-center text-xl text-red-500">Access Denied</div>;
 
       case 'reports':
-        return <ReportsPage userRole={userRole} />;
+        return <ReportsPage userRole={userRole} userData={userData} />;
 
       case 'system':
         return userRole === 'admin'
@@ -59,7 +64,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen antialiased font-sans">
-      <Header toggleSidebar={toggleSidebar} onLogout={handleLogout} />
+      <Header toggleSidebar={toggleSidebar} onLogout={handleLogout} userData={userData} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           isCollapsed={isSidebarCollapsed}

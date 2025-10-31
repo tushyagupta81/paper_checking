@@ -6,7 +6,7 @@ import requests
 
 MAC_ADDR = "12:12:12:12:12:12"
 paper_code = ["ASX", "ABC", "ASM", "CAL"]
-image_dir = f"{os.environ.get('HOME')}/Downloads"
+image_dir = r"C:\Users\verma\Downloads"
 random_images = [
     os.path.join(image_dir, file)
     for file in os.listdir(image_dir)
@@ -46,7 +46,7 @@ def get_token():
             "mac_addr": MAC_ADDR,
         },
     )
-    admin_token = res.json()["access_token"]
+    admin_token = res.json()["token"]["access_token"]
     res = requests.post(
         "http://localhost:8000/users/login",
         json={
@@ -55,7 +55,7 @@ def get_token():
             "mac_addr": MAC_ADDR,
         },
     )
-    examiner_token = res.json()["access_token"]
+    examiner_token = res.json()["token"]["access_token"]
 
     return admin_id, admin_token, examiner_id, examiner_token
 

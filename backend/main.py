@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from alembic import command
 from alembic.config import Config
@@ -21,8 +21,17 @@ async def lifespan(_: FastAPI):
     # Runs at shutdown (if needed)
 
 
-# app = FastAPI(lifespan=lifespan)
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
+
+# CORS middleware configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite default port
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(users.router)
 app.include_router(images.router)
 app.include_router(question.router)
@@ -32,5 +41,4 @@ app.openapi = get_custom_openapi(app)
 # Run the app with `uvicorn`
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)

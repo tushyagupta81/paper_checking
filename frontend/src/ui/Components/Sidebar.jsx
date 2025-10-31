@@ -5,7 +5,7 @@ export default function Sidebar({ isCollapsed, currentPage, setCurrentPage, user
 
   const NAV_ITEMS = [
     { name: 'Dashboard', view: 'dashboard' },
-    { name: 'Assignment & Evaluation', view: 'assignment', roles: ['evaluator'] },
+    { name: 'Assignment & Evaluation', view: 'assignment', roles: ['examiner'] },
     { name: 'Reports & Analytics', view: 'reports', roles: ['admin'] },
     { name: 'System & Utilities', view: 'system', roles: ['admin'] },
   ];
