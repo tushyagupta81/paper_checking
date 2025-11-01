@@ -21,7 +21,7 @@ async def lifespan(_: FastAPI):
     # Runs at shutdown (if needed)
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, debug=True)
 
 # CORS middleware configuration
 app.add_middleware(
@@ -41,4 +41,4 @@ app.openapi = get_custom_openapi(app)
 # Run the app with `uvicorn`
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, log_level="debug", access_log=True)

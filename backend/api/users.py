@@ -75,7 +75,7 @@ async def login_for_access_token(
             "token": Token(access_token=access_token, token_type="bearer"),
             "user_type": db_user.type,
         }
-    except Exception as e:
+    except Exception as _:
         db.rollback()
         raise invalid_cred
 

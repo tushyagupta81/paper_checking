@@ -1,5 +1,6 @@
 import os
 import random
+from queue import Queue
 from uuid import uuid4
 
 import requests
@@ -7,11 +8,11 @@ import requests
 MAC_ADDR = "12:12:12:12:12:12"
 paper_code = ["ASX", "ABC", "ASM", "CAL"]
 # image_dir = r"C:\Users\verma\Downloads"
-image_dir = f"{os.environ.get("HOME")}/Downloads"
+image_dir = f"{os.environ.get('HOME')}/Downloads"
 random_images = [
     os.path.join(image_dir, file)
     for file in os.listdir(image_dir)
-    if file.endswith(".jpg") or file.endswith(".png") 
+    if file.endswith(".jpg") or file.endswith(".png")
 ]
 PASSWORD = "Tushya@123"
 
@@ -77,6 +78,22 @@ def create_students(n=10):
         )
         ids.append(res.json()["id"])
         print(f"Created student: {ids[-1]}, {res.json()}")
+    return ids
+
+
+def create_examiners(n=10):
+    ids = []
+    for i in range(n):
+        res = requests.post(
+            "http://localhost:8000/users/signup",
+            json={
+                "password": PASSWORD,
+                "mac_addr": MAC_ADDR,
+                "type": "examiner",
+            },
+        )
+        ids.append(res.json()["id"])
+        print(f"Created examiner: {ids[-1]}, {res.json()}")
     return ids
 
 
@@ -164,8 +181,40 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
                 print(f"Uploaded {workbook_id=}, question={question + 1}, {page_no=}")
 
 
+def assign_question_to_examiners(examiner_ids: list, paper_ids: dict[str, list]):
+    q = Queue()
+    for paper_id in paper_ids:
+        for question_no, _ in paper_ids[paper_id]:
+            q.put((paper_id, question_no))
+
+    q = list(q.queue)
+    n = len(q) - 3
+    i = 0
+    while i < n:
+        json_data = {
+            "id": random.choice(examiner_ids),
+            "mac_addr": MAC_ADDR,
+            "paper_id": q[i][0],
+            "question_no": q[i][1],
+        }
+        res = requests.post(
+            "http://localhost:8000/users/examiner/assign",
+            json=json_data,
+            headers={
+                "Authorization": f"Bearer {ADMIN_JWT}",
+            },
+        )
+        print(
+            f"Assigned examiner {json_data['id']} paper {q[i][0]} question_no {q[i][1]}"
+        )
+        i += 1
+
+
 num_students = int(input("Number of students: "))
+num_examiners = int(input("Number of examiners: "))
 student_ids = create_students(num_students)
+examiner_ids = create_examiners(num_examiners)
 papers = create_question_bank(num_students)
 workbooks = assign_workbooks(student_ids, papers)
 upload_workbook_images(workbooks, papers)
+assign_question_to_examiners(examiner_ids, papers)

@@ -60,7 +60,7 @@ async def create_question_paper(
     return {"message": "Paper created successfully"}
 
 
-@router.post("/examiner/get")
+@router.post("/examiner/get_workbooks")
 def get_examiner_pending_work(
     data: GetQuestions,
     request: Request,
@@ -68,7 +68,9 @@ def get_examiner_pending_work(
     curr_user: Users = Depends(get_current_user),
 ):
     if str(curr_user.type) != "examiner":
-        raise HTTPException(403, detail="Only examiners can get questions and workbooks")
+        raise HTTPException(
+            403, detail="Only examiners can get questions and workbooks"
+        )
 
     paper_questions = (
         db.query(Examiners)
@@ -85,7 +87,12 @@ def get_examiner_pending_work(
         if paper_id not in mapping:
             mapping[paper_id] = {}
         mapping[paper_id][question_no] = []
-        workbooks = db.query(WorkbookStatus).with_entities(WorkbookStatus.workbook_id).filter_by(question_no=question_no, checked=False).all()
+        workbooks = (
+            db.query(WorkbookStatus)
+            .with_entities(WorkbookStatus.workbook_id)
+            .filter_by(question_no=question_no, checked=False)
+            .all()
+        )
         for workbook in workbooks:
             mapping[paper_id][question_no].append(workbook[0])
 
@@ -96,6 +103,58 @@ def get_examiner_pending_work(
             mac_addr=data.mac_addr,
             ip_addr=ip_addr,
             action="get_examiner_pending_work",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, detail=f"While commiting in assign workbook: {e}")
+
+    return {"data": mapping}
+
+
+@router.post("/examiners/all_workbooks")
+def get_workbooks_for_all_examiners(
+    data: GetQuestions,
+    request: Request,
+    db: Session = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    if str(curr_user.type) != "admin":
+        raise HTTPException(
+            403, detail="Only admins can get workbooks for all examiners"
+        )
+
+    paper_questions = (
+        db.query(Examiners)
+        .with_entities(Examiners.examiner_id, Examiners.paper_id, Examiners.question_no)
+        .all()
+    )
+
+    mapping = {}
+    for [examiner_id, paper_id, question_no] in paper_questions:
+        if examiner_id not in mapping:
+            mapping[examiner_id] = {}
+        if paper_id not in mapping[examiner_id]:
+            mapping[examiner_id][paper_id] = {}
+        mapping[examiner_id][paper_id][question_no] = []
+        workbooks = (
+            db.query(WorkbookStatus)
+            .with_entities(WorkbookStatus.workbook_id, WorkbookStatus.checked)
+            .all()
+        )
+        for workbook in workbooks:
+            mapping[examiner_id][paper_id][question_no].append(
+                {"workbook_id": workbook[0], "status": workbook[1]}
+            )
+
+    try:
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=data.mac_addr,
+            ip_addr=ip_addr,
+            action="get_workbooks_for_all_examiners",
             time=datetime.now(),
         )
         db.add(user_log)
