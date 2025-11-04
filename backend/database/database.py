@@ -1,25 +1,22 @@
 import os
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import declarative_base
 
 load_dotenv()
 
-database_url = os.environ.get("DATABASE_URL_SQLALCHEMY")
-if database_url is None:
-    print("Database url is missing in .env\nDATABASE_URL_SQLALCHEMY=?")
-    exit(1)
+database_url = os.environ["DATABASE_URL_SQLALCHEMY"]
 
-engine = create_engine(database_url)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_async_engine(database_url, echo=False)
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+)
+
 Base = declarative_base()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session

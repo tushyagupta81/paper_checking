@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from utils.mac_addr_type import MacAddress
 from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, String
-from sqlalchemy.orm import backref, relationship
+from sqlalchemy.orm import relationship
 
 from database.database import Base
 

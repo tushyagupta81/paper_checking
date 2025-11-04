@@ -2,14 +2,15 @@ from datetime import datetime
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                      UploadFile)
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.jwt_utils import get_current_user
-from utils.mac_addr_type import MacAddress
 from database.database import get_db
 from database.models import (GetImages, Images, StudentWorkbook, UserLog,
                              Users, WorkbookMarking)
 from images.s3 import BUCKET_NAME, URL_EXPIRY, get_obj_name, s3
+from utils.mac_addr_type import MacAddress
 
 router = APIRouter(prefix="/images", tags=["Images"])
 
@@ -22,19 +23,22 @@ async def upload_image(
     page_no: int = Form(...),
     file: UploadFile = File(...),
     mac_addr: MacAddress = Form(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
     # if str(curr_user.type) != "admin":
     #     raise HTTPException(403, detail="Only admins can upload images")
-    if not file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
+    # if all(not file.content_type.startswith("image/") for file in files):  # pyright: ignore[reportOptionalMemberAccess]
+    #     raise HTTPException(status_code=400, detail="Invalid file type")
+    if file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     paper_id = (
-        db.query(StudentWorkbook)
-        .filter(StudentWorkbook.workbook_id == workbook_id)
-        .first()
-    )
+        await db.execute(
+            select(StudentWorkbook).filter(StudentWorkbook.workbook_id == workbook_id)
+        )
+    ).first()
+
     if paper_id is None:
         raise HTTPException(
             status_code=500, detail="Unable to find paper_id for workbook"
@@ -71,7 +75,7 @@ async def upload_image(
             time=datetime.now(),
         )
         db.add(user_log)
-        db.commit()
+        await db.commit()
         file_url = s3.generate_presigned_url(
             ClientMethod="get_object",
             Params={"Bucket": BUCKET_NAME, "Key": object_name},
@@ -79,7 +83,7 @@ async def upload_image(
         )
         return {"message": "Upload successful", "url": file_url}
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -87,7 +91,7 @@ async def upload_image(
 async def get_images(
     images: GetImages,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
     if str(curr_user.type) != "examiner":
@@ -95,13 +99,13 @@ async def get_images(
     urls = {}
     try:
         image_keys = (
-            db.query(Images)
-            .filter(
-                Images.workbook_id == images.workbook_id,
-                Images.question_no == images.question_no,
+            await db.execute(
+                select(Images).filter(
+                    Images.workbook_id == images.workbook_id,
+                    Images.question_no == images.question_no,
+                )
             )
-            .all()
-        )
+        ).all()
         for image_key in image_keys:
             file_url = s3.generate_presigned_url(
                 ClientMethod="get_object",
@@ -124,8 +128,8 @@ async def get_images(
             time=datetime.now(),
         )
         db.add(user_log)
-        db.commit()
+        await db.commit()
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(500, detail=f"While in get images: {e}")
     return {"urls": urls}

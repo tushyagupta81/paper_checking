@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.jwt_utils import (ACCESS_TOKEN_EXPIRE_MINUTES, Token,
                             create_access_token, get_current_user)
@@ -17,13 +18,13 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 @router.post("/signup")
 async def create_user(
-    user: UserCreate, request: Request, db: Session = Depends(get_db)
+    user: UserCreate, request: Request, db: AsyncSession = Depends(get_db)
 ):
     try:
         hashed_pw = hash_password(user.password)
         new_user = Users(password=hashed_pw, type=user.type)
         db.add(new_user)
-        db.flush()
+        await db.flush()
         ip_addr = request.client.host if request.client is not None else ""
         user_log = UserLog(
             user_id=new_user.id,
@@ -33,28 +34,30 @@ async def create_user(
             time=datetime.now(),
         )
         db.add(user_log)
-        db.commit()
+        await db.commit()
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(500, detail=f"While Creating new user: {e}")
 
-    db.refresh(new_user)
+    await db.refresh(new_user)
     return {"message": "User created", "id": new_user.id}
 
 
 @router.post("/login")
 async def login_for_access_token(
-    user: UserLogin, request: Request, db: Session = Depends(get_db)
+    user: UserLogin, request: Request, db: AsyncSession = Depends(get_db)
 ):
     invalid_cred = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Incorrect user_id or password",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    db_user = db.query(Users).filter(Users.id == user.id).first()
+    db_user = (await db.execute(select(Users).filter(Users.id == user.id))).first()
     try:
-        if not db_user or not verify_password(user.password, str(db_user.password)):
+        if not db_user or not verify_password(user.password, str(db_user[0].password)):
             raise invalid_cred
+        else:
+            db_user = db_user[0]
 
         ip_addr = request.client.host if request.client is not None else ""
 
@@ -70,35 +73,32 @@ async def login_for_access_token(
             time=datetime.now(),
         )
         db.add(user_log)
-        db.commit()
-        return {
-            "token": Token(access_token=access_token, token_type="bearer"),
-            "user_type": db_user.type,
-        }
+        await db.commit()
     except Exception as _:
-        db.rollback()
+        await db.rollback()
         raise invalid_cred
+
+    return {
+        "token": Token(access_token=access_token, token_type="bearer"),
+        "user_type": db_user.type,
+    }
 
 
 @router.post("/examiner/unassigned")
 async def get_unassigned_examiners(
     examiner: UnassignedExaminers,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
     if str(curr_user.type) != "admin":
         raise HTTPException(403, detail="Only admins can get unassigned examiners")
     try:
-        subq = db.query(Examiners.examiner_id)
-        examiners = (
-            db.query(Users)
-            .with_entities(Users.id)
-            .filter(Users.type == "examiner")
-            .filter(~Users.id.in_(subq))
-            .all()
+        subq = select(Examiners.examiner_id)
+        result = await db.execute(
+            select(Users.id).where(Users.type == "examiner").where(~Users.id.in_(subq))
         )
-        examiners = [x[0] for x in examiners]
+        examiners = result.scalars().all()
         ip_addr = request.client.host if request.client is not None else ""
         user_log = UserLog(
             user_id=curr_user.id,
@@ -108,9 +108,9 @@ async def get_unassigned_examiners(
             time=datetime.now(),
         )
         db.add(user_log)
-        db.commit()
+        await db.commit()
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             500, detail=f"While commiting in get unassigned examiners: {e}"
         )
@@ -121,7 +121,7 @@ async def get_unassigned_examiners(
 async def assign_examiner(
     examiner: AssignExaminer,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
     if str(curr_user.type) != "admin":
@@ -142,9 +142,9 @@ async def assign_examiner(
             time=datetime.now(),
         )
         db.add(user_log)
-        db.commit()
+        await db.commit()
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(500, detail=f"While commiting in assign workbook: {e}")
     return {"message": "Assigned question to examiner"}
 
@@ -153,25 +153,21 @@ async def assign_examiner(
 async def assign_workbook(
     workbook: AssignWorkbook,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
     if str(curr_user.type) != "admin":
         raise HTTPException(403, detail="Only admins can assign workbooks to students")
     student = (
-        db.query(Users)
-        .with_entities(Users.type)
-        .filter_by(id=workbook.student_id)
-        .all()
-    )
+        await db.execute(select(Users.type).filter_by(id=workbook.student_id))
+    ).one()
     if len(student) == 0:
         raise HTTPException(404, detail="Student does not exist")
     student = student[0]
     if str(student[0]) != "student":
         raise HTTPException(403, detail="Only students can be assigned a workbook")
 
-    paper_ids = db.query(QuestionBank).with_entities(QuestionBank.paper_id).all()
-    paper_ids = set([x[0] for x in paper_ids])
+    paper_ids = set((await db.execute(select(QuestionBank.paper_id))).scalars().all())
     if workbook.paper_id not in paper_ids:
         raise HTTPException(404, detail="Paper id does not exist")
 
@@ -192,20 +188,19 @@ async def assign_workbook(
         )
         db.add(user_log)
         questions = (
-            db.query(QuestionBank)
-            .with_entities(QuestionBank.question_no)
-            .filter_by(paper_id=workbook.paper_id)
-            .all()
-        )
+            await db.execute(
+            select(QuestionBank.question_no)
+            .filter_by(paper_id=workbook.paper_id))
+        ).scalars().all()
         for q in questions:
             workbook_status = WorkbookStatus(
                 workbook_id=workbook.workbook_id,
-                question_no=q[0],
+                question_no=q,
                 checked=False,
             )
             db.add(workbook_status)
-        db.commit()
+        await db.commit()
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(500, detail=f"While commiting in assign workbook: {e}")
     return {"message": "Assigned workbook to student"}

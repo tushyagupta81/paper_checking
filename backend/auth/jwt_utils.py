@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.database import get_db
 from database.models import Users
@@ -47,7 +48,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
+    token: Annotated[str, Depends(oauth2_scheme)], db: AsyncSession = Depends(get_db)
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -63,7 +64,7 @@ async def get_current_user(
     except Exception as e:
         print(f"Error: {e}")
         raise credentials_exception
-    user = db.query(Users).filter(Users.id == user_id).first()
+    user = (await db.execute(select(Users).filter(Users.id == user_id))).first()
     if user is None:
         raise credentials_exception
-    return user
+    return user[0]
