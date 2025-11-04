@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 from sqlalchemy import (Boolean, Column, ForeignKey, ForeignKeyConstraint,
                         Integer, String)
-from sqlalchemy.orm import relationship
 
 from database.database import Base
 from utils.mac_addr_type import MacAddress
@@ -13,6 +12,7 @@ class QuestionBank(Base):
     paper_id = Column(String(255), primary_key=True)
     question_no = Column(Integer, primary_key=True)
     max_marks = Column(Integer, nullable=False)
+    pages = Column(Integer, nullable=False)
     question_key = Column(String(255), nullable=False)
     active = Column(Boolean, default=True)
 
@@ -30,9 +30,6 @@ class Examiners(Base):
             ["question_bank.paper_id", "question_bank.question_no"],
         ),
     )
-
-    question_bank = relationship("QuestionBank", backref="examiners")
-    # user = relationship("Users", backref="examiners")
 
 
 class AssignExaminer(BaseModel):

@@ -160,11 +160,10 @@ async def assign_workbook(
         raise HTTPException(403, detail="Only admins can assign workbooks to students")
     student = (
         await db.execute(select(Users.type).filter_by(id=workbook.student_id))
-    ).one()
-    if len(student) == 0:
+    ).scalars().one_or_none()
+    if student is None:
         raise HTTPException(404, detail="Student does not exist")
-    student = student[0]
-    if str(student[0]) != "student":
+    if student != "student":
         raise HTTPException(403, detail="Only students can be assigned a workbook")
 
     paper_ids = set((await db.execute(select(QuestionBank.paper_id))).scalars().all())

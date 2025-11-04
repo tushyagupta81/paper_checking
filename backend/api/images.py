@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
@@ -15,7 +16,88 @@ from utils.mac_addr_type import MacAddress
 router = APIRouter(prefix="/images", tags=["Images"])
 
 
-@router.post("/upload")
+@router.post("/upload/question")
+async def upload_question_images(
+    request: Request,
+    workbook_id: str = Form(...),
+    question_no: int = Form(...),
+    files: list[UploadFile] = File(...),
+    mac_addr: MacAddress = Form(...),
+    db: AsyncSession = Depends(get_db),
+    curr_user: Users = Depends(get_current_user),
+):
+    if str(curr_user.type) != "admin":
+        raise HTTPException(403, detail="Only admins can upload images")
+    if all(not file.content_type.startswith("image/") for file in files):  # pyright: ignore[reportOptionalMemberAccess]
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    paper_id = (
+        await db.execute(
+            select(StudentWorkbook).filter(StudentWorkbook.workbook_id == workbook_id)
+        )
+    ).scalars().first()
+
+    if paper_id is None:
+        raise HTTPException(
+            status_code=500, detail="Unable to find paper_id for workbook"
+        )
+    paper_id = str(paper_id.paper_id)
+    try:
+        for file in files:
+            if file.filename is None:
+                raise HTTPException(
+                    status_code=500, detail="Filename should be the page number"
+                )
+            try:
+                page_no = int(file.filename)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Filename is not an int. Error: {e}"
+                )
+
+            object_name = get_obj_name(
+                workbook_id=workbook_id,
+                paper_id=paper_id,
+                question_no=question_no,
+                page_no=page_no,
+            )
+            file_data = await file.read()
+
+            await asyncio.to_thread(
+                s3.put_object,
+                Bucket=BUCKET_NAME,
+                Key=object_name,
+                Body=file_data,
+                ContentType=file.content_type,
+            )
+
+            image_record = Images(
+                workbook_id=workbook_id,
+                question_no=question_no,
+                page_no=page_no,
+                object_key=object_name,
+            )
+            db.add(image_record)
+
+        ip_addr = request.client.host if request.client is not None else ""
+        user_log = UserLog(
+            user_id=curr_user.id,
+            mac_addr=mac_addr,
+            ip_addr=ip_addr,
+            action="upload_image",
+            time=datetime.now(),
+        )
+        db.add(user_log)
+
+        await db.commit()
+        return {"message": "Upload successful"}
+
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload/page")
 async def upload_image(
     request: Request,
     workbook_id: str = Form(...),
@@ -26,10 +108,8 @@ async def upload_image(
     db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
-    # if str(curr_user.type) != "admin":
-    #     raise HTTPException(403, detail="Only admins can upload images")
-    # if all(not file.content_type.startswith("image/") for file in files):  # pyright: ignore[reportOptionalMemberAccess]
-    #     raise HTTPException(status_code=400, detail="Invalid file type")
+    if str(curr_user.type) != "admin":
+        raise HTTPException(403, detail="Only admins can upload images")
     if file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
         raise HTTPException(status_code=400, detail="Invalid file type")
 
@@ -53,7 +133,8 @@ async def upload_image(
     file_data = await file.read()
 
     try:
-        s3.put_object(
+        await asyncio.to_thread(
+            s3.put_object,
             Bucket=BUCKET_NAME,
             Key=object_name,
             Body=file_data,
@@ -76,12 +157,7 @@ async def upload_image(
         )
         db.add(user_log)
         await db.commit()
-        file_url = s3.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={"Bucket": BUCKET_NAME, "Key": object_name},
-            ExpiresIn=URL_EXPIRY,  # seconds
-        )
-        return {"message": "Upload successful", "url": file_url}
+        return {"message": "Upload successful"}
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

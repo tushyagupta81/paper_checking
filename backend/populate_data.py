@@ -6,7 +6,7 @@ from uuid import uuid4
 import requests
 
 MAC_ADDR = "12:12:12:12:12:12"
-paper_code = ["ASX", "ABC", "ASM", "CAL"]
+paper_code = ["ASX", "ABC", "ASM", "CAL", "AMS", "TOC", "ADA", "DSA", "DEF", "QWE"]
 # image_dir = r"C:\Users\verma\Downloads"
 image_dir = f"{os.environ.get('HOME')}/Downloads"
 random_images = [
@@ -18,9 +18,6 @@ PASSWORD = "Tushya@123"
 
 
 def get_token():
-    # id = int(input("Enter id: "))
-    # password = str(input("Enter password: "))
-
     admin_id = requests.post(
         "http://localhost:8000/users/signup",
         json={
@@ -135,6 +132,7 @@ def create_question_bank(n=10):
                 "paper_id": paper_id,
                 "question_no": question_no,
                 "max_marks": random.randint(2, 6),
+                "pages": random.randint(2,6),
                 "mac_addr": MAC_ADDR,
             }
             res = requests.post(
@@ -146,7 +144,7 @@ def create_question_bank(n=10):
                 files={"file": (file_path, open(file_path, "rb"), "image/jpeg")},
             )
             if res.status_code == 200:
-                paper_ids[paper_id].append((data["question_no"], data["max_marks"]))
+                paper_ids[paper_id].append((data["question_no"], data["max_marks"], data["pages"]))
             else:
                 print(f"Error: {res.json()}")
         print(f"Create {paper_id=}, with {[d for d in paper_ids[paper_id]]}")
@@ -158,33 +156,29 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
     print("=== uploading images ===")
     for workbook_id in workbooks:
         paper_id = workbooks[workbook_id]
-        page_no = 0
-        for question, max_marks in papers[paper_id]:
-            for page in range(random.randint(1, 3)):
-                file_path = random.choice(random_images)
-                res = requests.post(
-                    "http://localhost:8000/images/upload",
-                    headers={
-                        "Authorization": f"Bearer {ADMIN_JWT}",
-                    },
-                    data={
-                        "workbook_id": workbook_id,
-                        "question_no": question + 1,
-                        "page_no": page_no,
-                        "mac_addr": MAC_ADDR,
-                    },
-                    files={"file": (file_path, open(file_path, "rb"), "image/jpeg")},
-                )
-                page_no += 1
-                if res.status_code != 200:
-                    print(res.text)
-                print(f"Uploaded {workbook_id=}, question={question + 1}, {page_no=}")
+        for question, _, pages in papers[paper_id]:
+            files = [("files", (str(p), open(random.choice(random_images), "rb"), "image/jpeg")) for p in range(1, pages+1)]
+            res = requests.post(
+                "http://localhost:8000/images/upload/question",
+                headers={
+                    "Authorization": f"Bearer {ADMIN_JWT}",
+                },
+                data={
+                    "workbook_id": workbook_id,
+                    "question_no": question + 1,
+                    "mac_addr": MAC_ADDR,
+                },
+                files=files  # pyright: ignore[reportArgumentType]
+            )
+            if res.status_code != 200:
+                print(res.text)
+            print(f"Uploaded {workbook_id=}, question={question + 1}, {pages=}")
 
 
 def assign_question_to_examiners(examiner_ids: list, paper_ids: dict[str, list]):
     q = Queue()
     for paper_id in paper_ids:
-        for question_no, _ in paper_ids[paper_id]:
+        for question_no, _, _ in paper_ids[paper_id]:
             q.put((paper_id, question_no))
 
     q = list(q.queue)
@@ -197,7 +191,7 @@ def assign_question_to_examiners(examiner_ids: list, paper_ids: dict[str, list])
             "paper_id": q[i][0],
             "question_no": q[i][1],
         }
-        res = requests.post(
+        _ = requests.post(
             "http://localhost:8000/users/examiner/assign",
             json=json_data,
             headers={
@@ -214,7 +208,7 @@ num_students = int(input("Number of students: "))
 num_examiners = int(input("Number of examiners: "))
 student_ids = create_students(num_students)
 examiner_ids = create_examiners(num_examiners)
-papers = create_question_bank(num_students)
+papers = create_question_bank(min(num_examiners, 15))
 workbooks = assign_workbooks(student_ids, papers)
 upload_workbook_images(workbooks, papers)
 assign_question_to_examiners(examiner_ids, papers)

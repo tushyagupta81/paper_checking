@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
@@ -21,6 +22,7 @@ async def create_question_paper(
     paper_id: str = Form(...),
     question_no: int = Form(...),
     max_marks: int = Form(...),
+    pages: int = Form(...),
     file: UploadFile = File(...),
     mac_addr: MacAddress = Form(...),
     db: AsyncSession = Depends(get_db),
@@ -33,7 +35,8 @@ async def create_question_paper(
             paper_id=paper_id, question_no=question_no
         )
         file_data = await file.read()
-        s3.put_object(
+        await asyncio.to_thread(
+            s3.put_object,
             Bucket=BUCKET_NAME,
             Key=question_object_key,
             Body=file_data,
@@ -43,6 +46,7 @@ async def create_question_paper(
             paper_id=paper_id,
             question_no=question_no,
             question_key=question_object_key,
+            pages=pages,
             max_marks=max_marks,
         )
         db.add(qp)
@@ -194,15 +198,12 @@ async def get_questions_assigned_to_all_examiners(
         )
 
     question_papers = (
-        (
-            await db.execute(
-                select(QuestionBank.paper_id, QuestionBank.question_no).filter_by(
-                    active=True
-                )
+        await db.execute(
+            select(QuestionBank.paper_id, QuestionBank.question_no).filter_by(
+                active=True
             )
         )
-        .all()
-    )
+    ).all()
 
     examiners = (
         await db.execute(
