@@ -19,9 +19,9 @@ except s3.exceptions.BucketAlreadyOwnedByYou:
     pass
 
 
-def get_obj_name(workbook_id: str, paper_id: str, question_no: int, page_no: int):
+def get_obj_name(workbook_id: str, paper_id: str, question_no: int, page_no: int, checked:bool):
     object_name = (
-        f"answer_sheet_{workbook_id}_{paper_id}_{question_no}_{page_no}_{str(uuid4())}"
+        f"answer_sheet_{workbook_id}_{paper_id}_{question_no}_{page_no}_{str(checked)}_{str(uuid4())}"
     )
     return object_name
 

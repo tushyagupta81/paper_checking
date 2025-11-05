@@ -132,7 +132,7 @@ def create_question_bank(n=10):
                 "paper_id": paper_id,
                 "question_no": question_no,
                 "max_marks": random.randint(2, 6),
-                "pages": random.randint(2,6),
+                "pages": random.randint(2, 6),
                 "mac_addr": MAC_ADDR,
             }
             res = requests.post(
@@ -144,7 +144,9 @@ def create_question_bank(n=10):
                 files={"file": (file_path, open(file_path, "rb"), "image/jpeg")},
             )
             if res.status_code == 200:
-                paper_ids[paper_id].append((data["question_no"], data["max_marks"], data["pages"]))
+                paper_ids[paper_id].append(
+                    (data["question_no"], data["max_marks"], data["pages"])
+                )
             else:
                 print(f"Error: {res.json()}")
         print(f"Create {paper_id=}, with {[d for d in paper_ids[paper_id]]}")
@@ -157,7 +159,13 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
     for workbook_id in workbooks:
         paper_id = workbooks[workbook_id]
         for question, _, pages in papers[paper_id]:
-            files = [("files", (str(p), open(random.choice(random_images), "rb"), "image/jpeg")) for p in range(1, pages+1)]
+            files = [
+                (
+                    "files",
+                    (str(p), open(random.choice(random_images), "rb"), "image/jpeg"),
+                )
+                for p in range(1, pages + 1)
+            ]
             res = requests.post(
                 "http://localhost:8000/images/upload/question",
                 headers={
@@ -167,8 +175,9 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
                     "workbook_id": workbook_id,
                     "question_no": question + 1,
                     "mac_addr": MAC_ADDR,
+                    "checked": False,
                 },
-                files=files  # pyright: ignore[reportArgumentType]
+                files=files,  # pyright: ignore[reportArgumentType]
             )
             if res.status_code != 200:
                 print(res.text)

@@ -1,9 +1,10 @@
 import asyncio
 from datetime import datetime
+from typing import Optional
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                      UploadFile)
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.jwt_utils import get_current_user
@@ -22,20 +23,30 @@ async def upload_question_images(
     workbook_id: str = Form(...),
     question_no: int = Form(...),
     files: list[UploadFile] = File(...),
+    checked: bool = Form(...),
+    marks: Optional[int] = Form(...),
     mac_addr: MacAddress = Form(...),
     db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
 ):
     if str(curr_user.type) != "admin":
         raise HTTPException(403, detail="Only admins can upload images")
+    if checked and marks is None:
+        raise HTTPException(400, detail="marks is required when checked is True")
     if all(not file.content_type.startswith("image/") for file in files):  # pyright: ignore[reportOptionalMemberAccess]
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     paper_id = (
-        await db.execute(
-            select(StudentWorkbook).filter(StudentWorkbook.workbook_id == workbook_id)
+        (
+            await db.execute(
+                select(StudentWorkbook).filter(
+                    StudentWorkbook.workbook_id == workbook_id
+                )
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if paper_id is None:
         raise HTTPException(
@@ -60,6 +71,7 @@ async def upload_question_images(
                 paper_id=paper_id,
                 question_no=question_no,
                 page_no=page_no,
+                checked=checked,
             )
             file_data = await file.read()
 
@@ -78,6 +90,15 @@ async def upload_question_images(
                 object_key=object_name,
             )
             db.add(image_record)
+            if checked:
+                await db.execute(
+                    update(WorkbookMarking)
+                    .where(
+                        WorkbookMarking.workbook_id == workbook_id,
+                        WorkbookMarking.question_no == question_no,
+                    )
+                    .values(marks=marks, submit_time=datetime.now())
+                )
 
         ip_addr = request.client.host if request.client is not None else ""
         user_log = UserLog(
@@ -129,6 +150,7 @@ async def upload_image(
         paper_id=paper_id,
         question_no=question_no,
         page_no=page_no,
+        checked=False,
     )
     file_data = await file.read()
 

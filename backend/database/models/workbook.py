@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 from utils.mac_addr_type import MacAddress
 from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, String
-from sqlalchemy.orm import relationship
 
 from database.database import Base
 
@@ -30,8 +29,6 @@ class WorkbookStatus(Base):
     question_no = Column(Integer, primary_key=True)
     checked = Column(Boolean, nullable=False, default=False)
 
-    student = relationship("StudentWorkbook", backref="statuses")
-
 
 class WorkbookMarking(Base):
     __tablename__ = "workbook_marking"
@@ -43,5 +40,3 @@ class WorkbookMarking(Base):
     open_time = Column(TIMESTAMP, nullable=False)
     marks = Column(Integer, nullable=True)
     submit_time = Column(TIMESTAMP, nullable=True)
-
-    student = relationship("StudentWorkbook", backref="workbook_marks_for_student")
