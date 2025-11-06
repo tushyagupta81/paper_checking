@@ -218,7 +218,7 @@ async def get_images(
                 select(Images).filter(
                     Images.workbook_id == images.workbook_id,
                     Images.question_no == images.question_no,
-                    Images.checked == False
+                    Images.checked == False,
                 )
             )
         ).all()
@@ -229,12 +229,24 @@ async def get_images(
                 ExpiresIn=URL_EXPIRY,  # seconds
             )
             urls[image_key.page_no] = file_url
-        workbook_marking = WorkbookMarking(
-            workbook_id=images.workbook_id,
-            question_no=images.question_no,
-            open_time=datetime.now(),
-        )
-        db.add(workbook_marking)
+            existing = (
+                await db.execute(
+                    select(WorkbookMarking).filter(
+                        WorkbookMarking.workbook_id == images.workbook_id,
+                        WorkbookMarking.question_no == images.question_no,
+                    )
+                )
+            ).first()
+
+            if existing:
+                existing.open_time = datetime.now()
+            else:
+                workbook_marking = WorkbookMarking(
+                    workbook_id=images.workbook_id,
+                    question_no=images.question_no,
+                    open_time=datetime.now(),
+                )
+                db.add(workbook_marking)
         ip_addr = request.client.host if request.client is not None else ""
         user_log = UserLog(
             user_id=curr_user.id,
