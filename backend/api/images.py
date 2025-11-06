@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.jwt_utils import get_current_user
 from database.database import get_db
-from database.models import (GetImages, Images, StudentWorkbook, UserLog,
-                             Users, WorkbookMarking)
+from database.models import (GetImages, Images, QuestionBank, StudentWorkbook,
+                             UserLog, Users, WorkbookMarking, WorkbookStatus)
 from images.s3 import BUCKET_NAME, URL_EXPIRY, get_obj_name, s3
 from utils.mac_addr_type import MacAddress
 
@@ -24,7 +24,7 @@ async def upload_question_images(
     question_no: int = Form(...),
     files: list[UploadFile] = File(...),
     checked: bool = Form(...),
-    marks: Optional[int] = Form(...),
+    marks: Optional[int] = Form(None),
     mac_addr: MacAddress = Form(...),
     db: AsyncSession = Depends(get_db),
     curr_user: Users = Depends(get_current_user),
@@ -37,22 +37,29 @@ async def upload_question_images(
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     paper_id = (
-        (
-            await db.execute(
-                select(StudentWorkbook).filter(
-                    StudentWorkbook.workbook_id == workbook_id
-                )
+        await db.execute(
+            select(StudentWorkbook.paper_id, QuestionBank.pages)
+            .join(
+                QuestionBank,
+                (QuestionBank.paper_id == StudentWorkbook.paper_id)
+                & (QuestionBank.question_no == question_no),
             )
+            .filter(StudentWorkbook.workbook_id == workbook_id)
         )
-        .scalars()
-        .first()
-    )
+    ).first()
 
     if paper_id is None:
         raise HTTPException(
             status_code=500, detail="Unable to find paper_id for workbook"
         )
-    paper_id = str(paper_id.paper_id)
+
+    if len(files) != paper_id[1]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Files should be equal to max number of pages. Reqires {paper_id[1]} pages, given {len(files)}, for '{paper_id[0]}', question no '{question_no}'",
+        )
+
+    paper_id = str(paper_id[0])
     try:
         for file in files:
             if file.filename is None:
@@ -87,6 +94,7 @@ async def upload_question_images(
                 workbook_id=workbook_id,
                 question_no=question_no,
                 page_no=page_no,
+                checked=checked,
                 object_key=object_name,
             )
             db.add(image_record)
@@ -98,6 +106,14 @@ async def upload_question_images(
                         WorkbookMarking.question_no == question_no,
                     )
                     .values(marks=marks, submit_time=datetime.now())
+                )
+                await db.execute(
+                    update(WorkbookStatus)
+                    .where(
+                        WorkbookStatus.workbook_id == workbook_id,
+                        WorkbookStatus.question_no == question_no,
+                    )
+                    .values(checked=True)
                 )
 
         ip_addr = request.client.host if request.client is not None else ""
@@ -165,6 +181,7 @@ async def upload_image(
         image_record = Images(
             workbook_id=workbook_id,
             question_no=question_no,
+            checked=False,
             page_no=page_no,
             object_key=object_name,
         )

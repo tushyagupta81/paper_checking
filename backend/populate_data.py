@@ -158,7 +158,7 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
     print("=== uploading images ===")
     for workbook_id in workbooks:
         paper_id = workbooks[workbook_id]
-        for question, _, pages in papers[paper_id]:
+        for question, max_marks, pages in papers[paper_id]:
             files = [
                 (
                     "files",
@@ -173,26 +173,28 @@ def upload_workbook_images(workbooks: dict[str, str], papers: dict[str, list]):
                 },
                 data={
                     "workbook_id": workbook_id,
-                    "question_no": question + 1,
+                    "question_no": question,
                     "mac_addr": MAC_ADDR,
+                    "marks": None,
                     "checked": False,
                 },
                 files=files,  # pyright: ignore[reportArgumentType]
             )
             if res.status_code != 200:
                 print(res.text)
-            print(f"Uploaded {workbook_id=}, question={question + 1}, {pages=}")
+            print(f"Uploaded {workbook_id=}, question={question}, {pages=}")
 
 
 def assign_question_to_examiners(examiner_ids: list, paper_ids: dict[str, list]):
     q = Queue()
     for paper_id in paper_ids:
-        for question_no, _, _ in paper_ids[paper_id]:
-            q.put((paper_id, question_no))
+        for question_no, max_marks, pages in paper_ids[paper_id]:
+            q.put((paper_id, question_no, max_marks, pages))
 
     q = list(q.queue)
     n = len(q) - 3
     i = 0
+    examiner_question = []
     while i < n:
         json_data = {
             "id": random.choice(examiner_ids),
@@ -211,6 +213,50 @@ def assign_question_to_examiners(examiner_ids: list, paper_ids: dict[str, list])
             f"Assigned examiner {json_data['id']} paper {q[i][0]} question_no {q[i][1]}"
         )
         i += 1
+        examiner_question.append(
+            (
+                json_data["id"],
+                json_data["paper_id"],
+                json_data["question_no"],
+                q[i][2],
+                q[i][3],
+            )
+        )
+
+    return examiner_question
+
+
+def check_workbook(workbooks: dict[str, str], papers: dict[str, list]):
+    print("=== checking workbooks ===")
+    for workbook_id in workbooks:
+        if random.randint(1, 10) <= 5:
+            continue
+        paper_id = workbooks[workbook_id]
+        for question, max_marks, pages in papers[paper_id]:
+            files = [
+                (
+                    "files",
+                    (str(p), open(random.choice(random_images), "rb"), "image/jpeg"),
+                )
+                for p in range(1, pages + 1)
+            ]
+            res = requests.post(
+                "http://localhost:8000/images/upload/question",
+                headers={
+                    "Authorization": f"Bearer {ADMIN_JWT}",
+                },
+                data={
+                    "workbook_id": workbook_id,
+                    "question_no": question,
+                    "mac_addr": MAC_ADDR,
+                    "marks": random.randint(0, max_marks),
+                    "checked": True,
+                },
+                files=files,  # pyright: ignore[reportArgumentType]
+            )
+            if res.status_code != 200:
+                print(res.text)
+            print(f"Checked {workbook_id=}, question={question}, {pages=}")
 
 
 num_students = int(input("Number of students: "))
@@ -219,5 +265,6 @@ student_ids = create_students(num_students)
 examiner_ids = create_examiners(num_examiners)
 papers = create_question_bank(min(num_examiners, 15))
 workbooks = assign_workbooks(student_ids, papers)
+examiner_question = assign_question_to_examiners(examiner_ids, papers)
 upload_workbook_images(workbooks, papers)
-assign_question_to_examiners(examiner_ids, papers)
+check_workbook(workbooks, papers)

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from sqlalchemy import Column, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from database.database import Base
@@ -14,6 +14,7 @@ class Images(Base):
     )
     question_no = Column(Integer, primary_key=True)
     page_no = Column(Integer, primary_key=True)
+    checked = Column(Boolean, primary_key=True)
     object_key = Column(String(255), nullable=False)
 
     workbook = relationship("StudentWorkbook", backref="images_from_student")
