@@ -104,9 +104,10 @@ class ApiService {
     });
   }
 
-  async getQuestions(paper_id) {
-    return this.request(`/question/${paper_id}`, {
-      method: 'GET',
+  async getQuestions(workbook_id, question_no,  mac_addr = "12:12:12:12:12:12") {
+    return this.request(`/images/get`, {
+      method: 'POST',
+      body: JSON.stringify({workbook_id, question_no, mac_addr})
     });
   }
 

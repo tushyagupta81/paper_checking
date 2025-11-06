@@ -218,10 +218,11 @@ async def get_images(
                 select(Images).filter(
                     Images.workbook_id == images.workbook_id,
                     Images.question_no == images.question_no,
+                    Images.checked == False
                 )
             )
         ).all()
-        for image_key in image_keys:
+        for image_key in image_keys[0]:
             file_url = s3.generate_presigned_url(
                 ClientMethod="get_object",
                 Params={"Bucket": BUCKET_NAME, "Key": image_key.object_key},
