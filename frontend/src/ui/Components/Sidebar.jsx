@@ -5,11 +5,12 @@ export default function Sidebar({ isCollapsed, currentPage, setCurrentPage, user
 
   const NAV_ITEMS = [
     { name: 'Dashboard', view: 'dashboard' },
+    { name: 'Create Question', view: 'create-question', roles: ['admin'] },
     { name: 'Assignment & Evaluation', view: 'assignment', roles: ['examiner'] },
     { name: 'Reports & Analytics', view: 'reports', roles: ['admin'] },
     { name: 'System & Utilities', view: 'system', roles: ['admin'] },
   ];
-
+  
   const filteredItems = NAV_ITEMS.filter(item => !item.roles || item.roles.includes(userRole));
 
   return (

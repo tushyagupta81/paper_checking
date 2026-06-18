@@ -41,9 +41,27 @@ class ApiService {
       const response = await fetch(url, config);
       
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Request failed');
+  const errorData = await response.json().catch(() => null);
+
+  let message = 'Request failed';
+
+  if (errorData?.detail) {
+    // FastAPI validation error format (ARRAY)
+      if (Array.isArray(errorData.detail)) {
+        message = errorData.detail
+          .map(err => err.msg)
+          .join(', ');
+      } else {
+        message = errorData.detail;
       }
+    } else if (errorData?.message) {
+      message = errorData.message;
+    } else if (typeof errorData === 'string') {
+      message = errorData;
+    }
+
+    throw new Error(message);
+  }
 
       return await response.json();
     } catch (error) {
@@ -90,14 +108,15 @@ class ApiService {
   }
 
   // Question endpoints
-  async createQuestion(paper_id, question_no, max_marks, file, mac_addr = "12:12:12:12:12:12") {
+  async createQuestion(paper_id, question_no, max_marks, pages, file, mac_addr = "12:12:12:12:12:12") {
     const formData = new FormData();
     formData.append('paper_id', paper_id);
     formData.append('question_no', question_no);
     formData.append('max_marks', max_marks);
+    formData.append('pages', pages);
     formData.append('mac_addr', mac_addr);
     formData.append('file', file);
-
+    
     return this.request('/question/create', {
       method: 'POST',
       body: formData,

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import CreateQuestionPage from './Components/CreateQuestionPage';
 import { useLocalStorage } from './Components/useLocalStorage';
 import LoginPage from './Components/LoginPage';
 import Header from './Components/Header';
@@ -43,6 +44,11 @@ export default function App() {
         if (userRole === 'examiner') return <EvaluatorDashboard userData={userData} />;
         if (userRole === 'user') return <UserDashboard userData={userData} />;
         break;
+      
+      case 'create-question':
+      return userRole === 'admin'
+        ? <CreateQuestionPage />
+        : <div className="p-8 text-center text-xl text-red-500">Access Denied</div>;
 
       case 'assignment':
         return userRole === 'examiner'
