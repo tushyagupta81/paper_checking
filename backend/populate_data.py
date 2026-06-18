@@ -7,8 +7,8 @@ import requests
 
 MAC_ADDR = "12:12:12:12:12:12"
 paper_code = ["ASX", "ABC", "ASM", "CAL", "AMS", "TOC", "ADA", "DSA", "DEF", "QWE"]
-image_dir = r"C:\Users\Pratishtha\Downloads"
-# image_dir = f"{os.environ.get('HOME')}/Downloads"
+#image_dir = r"C:\Users\Pratishtha\Downloads"
+image_dir = f"{os.environ.get('HOME')}/Downloads"
 random_images = [
     os.path.join(image_dir, file)
     for file in os.listdir(image_dir)
