@@ -1,4 +1,5 @@
 // src/services/api.js
+/*
 const API_BASE_URL = 'http://localhost:8000';
 
 class ApiService {
@@ -164,3 +165,152 @@ class ApiService {
 }
 
 export default new ApiService();
+
+*/
+
+const API_BASE_URL = 'http://localhost:8000';
+
+class ApiService {
+  constructor() {
+    this.baseURL = API_BASE_URL;
+    this.token = localStorage.getItem('token') || null;
+  }
+
+  setToken(token) {
+    this.token = token;
+    localStorage.setItem('token', token);
+  }
+
+  clearToken() {
+    this.token = null;
+    localStorage.removeItem('token');
+  }
+
+  async request(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    const headers = { ...options.headers };
+
+    if (this.token && !options.skipAuth) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    try {
+      const response = await fetch(url, { ...options, headers });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Request failed');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('API Error:', error);
+      throw error;
+    }
+  }
+
+  // ─── Auth ────────────────────────────────────────────────
+  async login(id, password, mac_addr = "12:12:12:12:12:12") {
+    const data = await this.request('/users/login', {
+      method: 'POST',
+      body: JSON.stringify({ id, password, mac_addr }),
+      skipAuth: true,
+    });
+    if (data.token?.access_token) this.setToken(data.token.access_token);
+    return data;
+  }
+
+  async signup(password, type = "student", mac_addr = "12:12:12:12:12:12") {
+    return this.request('/users/signup', {
+      method: 'POST',
+      body: JSON.stringify({ password, mac_addr, type }),
+      skipAuth: true,
+    });
+  }
+
+  // ─── Phase 1: Create Question ────────────────────────────
+  async createQuestion(paper_id, question_no, max_marks, pages, file, mac_addr = "12:12:12:12:12:12") {
+    const formData = new FormData();
+    formData.append('paper_id', paper_id);
+    formData.append('question_no', question_no);
+    formData.append('max_marks', max_marks);
+    formData.append('pages', pages);
+    formData.append('mac_addr', mac_addr);
+    formData.append('file', file);
+    return this.request('/question/create', { method: 'POST', body: formData });
+  }
+
+  // ─── Phase 2: Assign Workbook to Student ────────────────
+  async assignWorkbook(student_id, workbook_id, paper_id, mac_addr = "12:12:12:12:12:12") {
+    return this.request('/users/student/assign', {
+      method: 'POST',
+      body: JSON.stringify({ student_id, workbook_id, paper_id, mac_addr }),
+    });
+  }
+
+  // ─── Phase 3: Upload Scanned Images ─────────────────────
+  async uploadQuestionImages(workbook_id, question_no, files, mac_addr = "12:12:12:12:12:12") {
+    const formData = new FormData();
+    formData.append('workbook_id', workbook_id);
+    formData.append('question_no', question_no);
+    formData.append('checked', 'false');
+    formData.append('mac_addr', mac_addr);
+    // CRITICAL: filename must be the page number — backend uses it as page_no
+    files.forEach((file, index) => {
+      formData.append('files', file, String(index + 1));
+    });
+    return this.request('/images/upload/question', { method: 'POST', body: formData });
+  }
+
+  // ─── Phase 4: Assign Examiner ────────────────────────────
+  async getUnassignedExaminers(mac_addr = "12:12:12:12:12:12") {
+    return this.request('/users/examiner/unassigned', {
+      method: 'POST',
+      body: JSON.stringify({ mac_addr }),
+    });
+  }
+
+  async assignExaminer(examiner_id, paper_id, question_no, mac_addr = "12:12:12:12:12:12") {
+    return this.request('/users/examiner/assign', {
+      method: 'POST',
+      body: JSON.stringify({ id: examiner_id, paper_id, question_no, mac_addr }),
+    });
+  }
+
+  async getAssignedQuestions(mac_addr = "12:12:12:12:12:12") {
+    return this.request('/question/assigned', {
+      method: 'POST',
+      body: JSON.stringify({ mac_addr }),
+    });
+  }
+
+  // ─── Phase 5: Dashboard Stats ────────────────────────────
+  async getAllExaminerWorkbooks(mac_addr = "12:12:12:12:12:12") {
+    return this.request('/question/examiners/all_workbooks', {
+      method: 'POST',
+      body: JSON.stringify({ mac_addr }),
+    });
+  }
+
+  // ─── Examiner ────────────────────────────────────────────
+  async getExaminerWorkbooks(mac_addr = "12:12:12:12:12:12") {
+    return this.request('/question/examiner/get_workbooks', {
+      method: 'POST',
+      body: JSON.stringify({ mac_addr }),
+    });
+  }
+
+  async getImages(workbook_id, question_no, mac_addr = "12:12:12:12:12:12") {
+    return this.request('/images/get', {
+      method: 'POST',
+      body: JSON.stringify({ workbook_id, question_no, mac_addr }),
+    });
+  }
+}
+
+export default new ApiService();
+
+
+
