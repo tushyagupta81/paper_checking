@@ -201,13 +201,9 @@ async def get_examiner_pending_work(
         if wb_paper_id is not None:
             # Normal case: we know the workbook's real paper_id via the join.
             if wb_qno not in assigned_by_paper.get(wb_paper_id, set()):
-                continue  # this question isn't assigned to this examiner for this paper
+                continue  
             effective_paper_id = wb_paper_id
         else:
-            # StudentWorkbook join didn't match (e.g. data inconsistency).
-            # Fall back to matching by question_no alone, same as the
-            # original working query, so we never silently drop a workbook
-            # that used to show up just because this join came back empty.
             matches = [p for p, q in paper_question_pairs if q == wb_qno]
             if not matches:
                 continue
@@ -330,9 +326,6 @@ async def get_questions_assigned_to_all_examiners(
             403, detail="Only admins can get workbooks for all examiners"
         )
 
-    # Ordered newest-first (most recently created question at the top) so
-    # the admin can immediately see new, likely-unassigned questions
-    # without having to scroll/search through an alphabetically-sorted list.
     question_papers = (
         await db.execute(
             select(QuestionBank.paper_id, QuestionBank.question_no)
@@ -351,10 +344,6 @@ async def get_questions_assigned_to_all_examiners(
         for [examiner_id, paper_id, question_no] in examiners
     }
 
-    # Flat list, already in newest-first order (from question_papers above)
-    # — this preserves true per-question recency, which a nested
-    # paper_id -> question_no dict cannot, since a single paper's
-    # questions may have been added on different occasions.
     assignments = [
         {
             "paper_id": paper_id,
@@ -364,10 +353,6 @@ async def get_questions_assigned_to_all_examiners(
         for [paper_id, question_no] in question_papers
     ]
 
-    # Kept for any older frontend code still expecting the nested shape —
-    # note this collapses true per-question ordering within a shared
-    # paper_id, which is exactly why `assignments` (flat, ordered) above
-    # is now the recommended field to use.
     result = {}
     for [paper_id, question_no] in question_papers:
         examiner_id = examiner_mapping.get((paper_id, question_no), "Unassigned")
