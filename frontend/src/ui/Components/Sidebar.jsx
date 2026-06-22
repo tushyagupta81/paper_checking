@@ -9,7 +9,6 @@ export default function Sidebar({ isCollapsed, currentPage, setCurrentPage, user
     { name: 'Assign Workbook',        view: 'assign-workbook',  icon: BookOpen,    roles: ['admin'] },
     { name: 'Upload Answer Sheets',   view: 'upload-images',    icon: Upload,      roles: ['admin'] },
     { name: 'Assign Examiner',        view: 'assign-examiner',  icon: UserCheck,   roles: ['admin'] },
-    { name: 'Evaluation',             view: 'assignment',       icon: BookOpen,    roles: ['examiner'] },
   ];
 
   const filteredItems = NAV_ITEMS.filter(item => !item.roles || item.roles.includes(userRole));

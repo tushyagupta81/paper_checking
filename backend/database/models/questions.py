@@ -1,6 +1,7 @@
 from pydantic import BaseModel
-from sqlalchemy import (Boolean, Column, ForeignKey, ForeignKeyConstraint,
-                        Integer, String)
+from sqlalchemy import (Boolean, Column, DateTime, ForeignKey,
+                        ForeignKeyConstraint, Integer, String)
+from sqlalchemy.sql import func
 
 from database.database import Base
 from utils.mac_addr_type import MacAddress
@@ -15,6 +16,7 @@ class QuestionBank(Base):
     pages = Column(Integer, nullable=False)
     question_key = Column(String(255), nullable=False)
     active = Column(Boolean, default=True)
+    created_at = Column(DateTime(), server_default=func.now(), nullable=False)
 
 
 class Examiners(Base):

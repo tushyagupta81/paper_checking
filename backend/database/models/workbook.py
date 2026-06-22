@@ -40,3 +40,4 @@ class WorkbookMarking(Base):
     open_time = Column(TIMESTAMP, nullable=False)
     marks = Column(Integer, nullable=True)
     submit_time = Column(TIMESTAMP, nullable=True)
+    comment = Column(String(2000), nullable=True)

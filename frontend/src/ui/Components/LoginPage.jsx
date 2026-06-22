@@ -11,16 +11,20 @@ export default function LoginPage({ onLogin }) {
   const [role, setRole] = useState('student');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // const [successMsg, setSuccessMsg] = useState(''); 
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e) => {  
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
       const response = await api.login(parseInt(userId), password);
-      const userRole = response.user_type || 'user';
-      
+      // const userRole = response.user_type || 'user';
+      const userRole = response.user_type;
+      if (!userRole) {
+        throw new Error('Server did not return a user role. Please contact support.');
+      }
       onLogin(userRole, response);
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.');
@@ -41,6 +45,7 @@ export default function LoginPage({ onLogin }) {
       
       // If signup is successful, you might auto-login or switch to the login form
       alert('Signup successful! Please log in.');
+      setSuccessMsg(`Account created! Your User ID is ${response.id}. Use it to sign in.`)
       setIsLogin(true); // Switch to login form
       setUserId(response.id); // Pre-fill ID if API returns it
       setPassword('');
