@@ -169,7 +169,6 @@ async def assign_examiner(
     already_assigned = (
         await db.execute(
             select(Examiners).filter_by(
-                examiner_id=examiner.id,
                 paper_id=examiner.paper_id,
                 question_no=examiner.question_no,
             )
@@ -178,8 +177,9 @@ async def assign_examiner(
     if already_assigned is not None:
         raise HTTPException(
             409,
-            detail=f"Examiner #{examiner.id} is already assigned to question "
-                   f"{examiner.question_no} of paper '{examiner.paper_id}'",
+            detail=f"Question {examiner.question_no} of paper '{examiner.paper_id}' "
+                   f"is already assigned to Examiner #{already_assigned.examiner_id}. "
+                   f"A question can only have one examiner.",
         )
 
     try:

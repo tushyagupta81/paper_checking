@@ -254,7 +254,11 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
       // Tool stays active after stamping, same as pen/highlight, so the
       // examiner can place multiple ✓ / ✖ marks without reselecting it.
     };
-
+    const onUp = () => {
+      isDrawing.current = false;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    };
     const onDown = (e) => {
       e.preventDefault();
       const cx = e.touches ? e.touches[0].clientX : e.clientX;
@@ -266,7 +270,7 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
         drawStamp(drawingMode, x, y);
         return;
       }
-      if (drawingMode === 'pen' || drawingMode === 'highlight') {
+      if (drawingMode === 'pen' || drawingMode === 'highlight' || drawingMode === 'eraser') {
         isDrawing.current = true;
         ctx.beginPath();
         ctx.moveTo(x, y);
@@ -279,29 +283,40 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
       const cx = e.touches ? e.touches[0].clientX : e.clientX;
       const cy = e.touches ? e.touches[0].clientY : e.clientY;
       const { x, y } = coords(cx, cy);
-      ctx.lineTo(x, y);
-
+        
       if (drawingMode === 'pen') {
         ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth   = 4;
         ctx.lineCap = ctx.lineJoin = 'round';
-        ctx.globalAlpha = 1;
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      
       } else if (drawingMode === 'highlight') {
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.strokeStyle = 'rgba(255,196,0,0.05)';
+        // Draw segment-by-segment from lastPos so each stroke is one
+        // fresh path — this prevents globalAlpha from stacking up over
+        // a long drag and turning the highlight fully opaque.
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 0.15;
+        ctx.strokeStyle = '#FACC15';
         ctx.lineWidth   = 30;
         ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(lastPos.current.x, lastPos.current.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      
+      } else if (drawingMode === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
         ctx.globalAlpha = 1;
+        ctx.lineWidth   = 24;
+        ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.lineTo(x, y);
+        ctx.stroke();
       }
-      ctx.stroke();
+    
       lastPos.current = { x, y };
-    };
-
-    const onUp = () => {
-      isDrawing.current = false;
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
     };
 
     canvas.addEventListener('mousedown',  onDown);
@@ -705,10 +720,11 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
         <div>
           <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-2 mb-3">Annotations</h3>
           <div className="grid grid-cols-2 gap-2">
-            <AnnotationButton type="check"     icon={Check}   colorClass="text-green-600 border-green-300"  label="Correct"    active={drawingMode === 'check'}     onClick={() => setDrawingMode('check')} />
-            <AnnotationButton type="cross"     icon={X}       colorClass="text-red-600 border-red-300"      label="Wrong"      active={drawingMode === 'cross'}     onClick={() => setDrawingMode('cross')} />
-            <AnnotationButton type="pen"       icon={Pen}     colorClass="text-red-600 border-red-300"      label="Pen"        active={drawingMode === 'pen'}       onClick={() => setDrawingMode('pen')} />
+            <AnnotationButton type="check"     icon={Check}   colorClass="text-green-600 border-green-300"   label="Correct"   active={drawingMode === 'check'}     onClick={() => setDrawingMode('check')} />
+            <AnnotationButton type="cross"     icon={X}       colorClass="text-red-600 border-red-300"       label="Wrong"     active={drawingMode === 'cross'}     onClick={() => setDrawingMode('cross')} />
+            <AnnotationButton type="pen"       icon={Pen}     colorClass="text-red-600 border-red-300"       label="Pen"       active={drawingMode === 'pen'}       onClick={() => setDrawingMode('pen')} />
             <AnnotationButton type="highlight" icon={Palette} colorClass="text-yellow-600 border-yellow-300" label="Highlight" active={drawingMode === 'highlight'} onClick={() => setDrawingMode('highlight')} />
+            <AnnotationButton type="eraser"    icon={Scan}    colorClass="text-gray-600 border-gray-300"     label="Eraser"    active={drawingMode === 'eraser'}    onClick={() => setDrawingMode('eraser')} />
           </div>
           <button
             onClick={() => setDrawingMode(null)}
