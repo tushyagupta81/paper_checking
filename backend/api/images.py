@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
                     UploadFile)
 from sqlalchemy import select, update
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.jwt_utils import get_current_user
@@ -224,8 +225,16 @@ async def upload_checked_images(
 
     try:
         for file, page_no in zip(files, page_nos):
-            if not (file.content_type or "").startswith("image/"):
-                raise HTTPException(400, detail=f"File for page {page_no} is not an image")
+            content_type = file.content_type or ""
+            # A checked submission is now a single flattened PDF containing every
+            # page of the question (built client-side), so accept application/pdf
+            # in addition to plain images (kept for backwards compatibility with
+            # any old per-page image uploads).
+            if not (content_type.startswith("image/") or content_type == "application/pdf"):
+                raise HTTPException(
+                    400,
+                    detail=f"File for page {page_no} is not an image or PDF (got '{content_type}')",
+                )
 
             object_name = get_obj_name(
                 workbook_id=workbook_id,
@@ -302,7 +311,7 @@ async def upload_image(
 ):
     if str(curr_user.type) != "admin":
         raise HTTPException(403, detail="Only admins can upload images")
-    if file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
+    if not file.content_type.startswith("image/"):  # pyright: ignore[reportOptionalMemberAccess]
         raise HTTPException(status_code=400, detail="Invalid file type")
 
     paper_id = (
@@ -388,24 +397,15 @@ async def get_images(
             urls[image_key.page_no] = file_url
 
         if urls:  
-            existing = (
-                await db.execute(
-                    select(WorkbookMarking).filter(
-                        WorkbookMarking.workbook_id == images.workbook_id,
-                        WorkbookMarking.question_no == images.question_no,
-                    )
-                )
-            ).scalar_one_or_none()
-
-            if existing:
-                existing.open_time = datetime.now()
-            else:
-                workbook_marking = WorkbookMarking(
-                    workbook_id=images.workbook_id,
-                    question_no=images.question_no,
-                    open_time=datetime.now(),
-                )
-                db.add(workbook_marking)
+            upsert_stmt = mysql_insert(WorkbookMarking).values(
+                workbook_id=images.workbook_id,
+                question_no=images.question_no,
+                open_time=datetime.now(),
+            )
+            upsert_stmt = upsert_stmt.on_duplicate_key_update(
+                open_time=upsert_stmt.inserted.open_time
+            )
+            await db.execute(upsert_stmt)
 
         ip_addr = request.client.host if request.client is not None else ""
         user_log = UserLog(

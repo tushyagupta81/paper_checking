@@ -191,7 +191,11 @@ class ApiService {
         formData.append('page_numbers', pageNumbers.join(','));
         formData.append('mac_addr', mac_addr);
         blobs.forEach((blob, index) => {
-            formData.append('files', blob, `checked_page_${pageNumbers[index]}.png`);
+            const ext = blob.type === 'application/pdf' ? 'pdf'
+                    :   blob.type === 'image/jpeg' ? 'jpg'
+                    :   blob.type === 'image/png' ? 'png'
+                    : 'bin';
+            formData.append('files', blob, `checked_page_${pageNumbers[index]}.${ext}`);
         });
         return this.request('/images/upload/checked', { method: 'POST', body: formData });
     }

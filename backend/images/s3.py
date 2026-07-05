@@ -17,7 +17,7 @@ s3_public = boto3.client(
 )
 
 BUCKET_NAME = "images"
-URL_EXPIRY = 3600
+URL_EXPIRY = 5  # seconds 
 
 try:
     s3.create_bucket(Bucket=BUCKET_NAME)
@@ -39,12 +39,10 @@ try:
         },
     )
 except Exception:
-    # Non-fatal: if this fails (e.g. unsupported in this MinIO version),
-    # annotation flattening may break, but everything else still works.
     pass
 
 
-def get_obj_name(workbook_id: str, paper_id: str, question_no: int, page_no: int, checked:bool):
+def get_obj_name(workbook_id: str, paper_id: str, question_no: int, page_no: int, checked: bool):
     object_name = (
         f"answer_sheet_{workbook_id}_{paper_id}_{question_no}_{page_no}_{str(checked)}_{str(uuid4())}"
     )
@@ -54,3 +52,12 @@ def get_obj_name(workbook_id: str, paper_id: str, question_no: int, page_no: int
 def get_question_object_name(paper_id: str, question_no: int):
     object_name = f"question_{paper_id}_{question_no}_{str(uuid4())}"
     return object_name
+
+# # Single combined PDF holding every (annotated) page of one answer,
+# # replacing the old one-object-per-page scheme for checked images.
+
+# def get_checked_pdf_object_name(workbook_id: str, paper_id: str, question_no: int):
+#     object_name = (
+#         f"answer_sheet_{workbook_id}_{paper_id}_{question_no}_checked_{str(uuid4())}.pdf"
+#     )
+#     return object_name
