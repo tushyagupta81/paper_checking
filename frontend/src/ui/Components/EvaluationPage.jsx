@@ -1,6 +1,6 @@
 // frontend/src/ui/Components/EvaluationPage.jsx
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Scan, Pen, Palette, BookOpen, Check, X, AlertCircle, ArrowLeft, CheckCircle } from 'lucide-react';
+import { Scan, Pen, Palette, Check, X, AlertCircle, ArrowLeft, CheckCircle, Eraser, RotateCcw, RotateCw } from 'lucide-react';
 import api from '../api.js';
 
 const formatMark = (mark) => {
@@ -8,9 +8,70 @@ const formatMark = (mark) => {
   return Number.isInteger(mark) ? String(mark) : mark.toFixed(1);
 };
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── SVG cursor builder ───────────────────────────────────────────────────────
+function makeCursor(mode, eraserSize) {
+  const enc = (s) => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
 
-const AnnotationButton = ({ type, icon: Icon, colorClass, label, active, onClick }) => (
+  if (mode === 'pen') {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+      <g transform="rotate(35 20 20)">
+        <rect x="15" y="6" width="8" height="22" rx="3" fill="#1f2937"/>
+        <rect x="15" y="20" width="8" height="5" fill="#3b82f6"/>
+        <polygon points="15,28 23,28 19,36" fill="#d1d5db"/>
+        <circle cx="19" cy="36" r="1.5" fill="#111827"/>
+      </g>
+    </svg>`;
+    return `${enc(svg)} 19 36, crosshair`;
+  }
+  if (mode === 'highlight') {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+      <circle cx="18" cy="18" r="14" fill="rgba(250,204,21,0.5)" stroke="rgba(202,138,4,0.8)" stroke-width="1.5"/>
+    </svg>`;
+    return `${enc(svg)} 18 18, crosshair`;
+  }
+  if (mode === 'check') {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+      <text x="2" y="30" font-size="28" fill="white" font-family="sans-serif" stroke="#333" stroke-width="1" paint-order="stroke">✓</text>
+    </svg>`;
+    return `${enc(svg)} 2 30, crosshair`;
+  }
+  if (mode === 'cross') {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+      <text x="2" y="30" font-size="28" fill="white" font-family="sans-serif" stroke="#333" stroke-width="1" paint-order="stroke">✖</text>
+    </svg>`;
+    return `${enc(svg)} 2 30, crosshair`;
+  }
+  if (mode === 'eraser') {
+    const disp = Math.min(Math.max(Math.round(eraserSize / 3), 10), 52);
+    const half = Math.round(disp / 2);
+    const tot  = disp + 8;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${tot}" height="${tot}">
+      <rect x="4" y="4" width="${disp}" height="${disp}" rx="2"
+            fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="1.5" stroke-dasharray="3,2"/>
+    </svg>`;
+    return `${enc(svg)} ${half + 4} ${half + 4}, crosshair`;
+  }
+  return 'default';
+}
+
+// ─── jsPDF lazy loader ────────────────────────────────────────────────────────
+let _JsPDF = null;
+async function getJsPDF() {
+  if (_JsPDF) return _JsPDF;
+  await new Promise((res, rej) => {
+    if (document.getElementById('jspdf-cdn')) { res(); return; }
+    const s = document.createElement('script');
+    s.id = 'jspdf-cdn';
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  _JsPDF = window.jspdf.jsPDF;
+  return _JsPDF;
+}
+
+// ─── Annotation button ────────────────────────────────────────────────────────
+const AnnotationButton = ({ icon: Icon, colorClass, label, active, onClick }) => (
   <button
     onClick={onClick}
     className={`w-full py-2 flex items-center justify-center rounded-lg border-2 transition duration-150
@@ -23,299 +84,279 @@ const AnnotationButton = ({ type, icon: Icon, colorClass, label, active, onClick
 );
 
 // ─── Main component ───────────────────────────────────────────────────────────
+export default function EvaluationPage({ workbookId, questionNo, paperId, userData, onBack, onSubmitDone }) {
 
-/**
- * Props:
- *   workbookId  (string)  — e.g. "W-1234"         passed from EvaluatorDashboard
- *   questionNo  (number)  — e.g. 1                 passed from EvaluatorDashboard
- *   paperId     (string)  — e.g. "CS101-2024"      passed from EvaluatorDashboard
- *   userData    (object)  — current logged-in user
- *   onBack      (fn)      — called after submit or when back button pressed
- */
-export default function EvaluationPage({ workbookId, questionNo, paperId, userData, onBack }) {
-  // ── Core state ──────────────────────────────────────────────────────────────
-  const [currentMark, setCurrentMark]         = useState(0);
-  const [annotationText, setAnnotationText]   = useState('');
-  const [drawingMode, setDrawingMode]         = useState(null);
-  const [currentPage, setCurrentPage]         = useState(1);
-  const [showModelAnswer, setShowModelAnswer] = useState(false);
+  // ── Core state ───────────────────────────────────────────────────────────────
+  const [currentMark,    setCurrentMark]    = useState(0);
+  const [annotationText, setAnnotationText] = useState('');
+  const [drawingMode,    setDrawingMode]    = useState(null);
+  const [eraserSize,     setEraserSize]     = useState(24);
+  const [currentPage,    setCurrentPage]    = useState(1);
   const [showPagePreview, setShowPagePreview] = useState(false);
 
-  // ── Data state ──────────────────────────────────────────────────────────────
-  const [images, setImages]         = useState([]);  // array of presigned URLs
-  const [maxMarks, setMaxMarks]     = useState(10);  // from question_bank
-  const [imagesLoading, setImagesLoading] = useState(true);
+  // Rotation per page: { pageNum: 0 | 90 | 180 | 270 }
+  const [pageRotations, setPageRotations] = useState({});
+
+  // ── Data state ───────────────────────────────────────────────────────────────
+  const [images,          setImages]          = useState([]);
+  const [maxMarks,        setMaxMarks]        = useState(10);
+  const [imagesLoading,   setImagesLoading]   = useState(true);
   const [imageLoadStatus, setImageLoadStatus] = useState({});
 
-  // Question image (the scanned question itself) — kept separate from
-  // answer images so a failure here never blocks the answer/marking flow.
-  const [questionImageUrl, setQuestionImageUrl] = useState(null);
+  // Buffered blob URLs — fetched once, never expire
+  const [bufferedUrls, setBufferedUrls] = useState({});
+  const blobUrlsRef = useRef({});
+
+  const [questionImageUrl,     setQuestionImageUrl]     = useState(null);
   const [questionImageLoading, setQuestionImageLoading] = useState(true);
-  const [questionImageError, setQuestionImageError] = useState('');
+  const [questionImageError,   setQuestionImageError]   = useState('');
 
-  // ── Submit state ────────────────────────────────────────────────────────────
-  const [submitting, setSubmitting]   = useState(false);
+  // ── Submit state ─────────────────────────────────────────────────────────────
+  const [submitting,  setSubmitting]  = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [submitted, setSubmitted]     = useState(false);  // success state
+  const [submitted,   setSubmitted]   = useState(false);
 
-  // ── Refs ────────────────────────────────────────────────────────────────────
-  const canvasRef   = useRef(null);
-  const imgRef      = useRef(null);
-  const isDrawing   = useRef(false);
-  const lastPos     = useRef({ x: 0, y: 0 });
+  // ── Refs ─────────────────────────────────────────────────────────────────────
+  const canvasRef       = useRef(null);
+  const imgRef          = useRef(null);
+  const isDrawing       = useRef(false);
+  const lastPos         = useRef({ x: 0, y: 0 });
+  const pageAnnotations = useRef({});   // { pageNum: dataURL } — annotation layer only
+  const eraserSizeRef   = useRef(eraserSize);
+  useEffect(() => { eraserSizeRef.current = eraserSize; }, [eraserSize]);
 
-  // Per-page annotation storage: { [pageNumber]: dataURL }
-  // The single <canvas> is reused across pages, so its content must be
-  // saved here before switching pages and restored when coming back —
-  // otherwise navigating Next/Previous silently erases prior marks.
-  const pageAnnotations = useRef({});
+  // Free blob URLs on unmount
+  useEffect(() => () => {
+    Object.values(blobUrlsRef.current).forEach(u => URL.revokeObjectURL(u));
+  }, []);
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
+  // ── Derived ──────────────────────────────────────────────────────────────────
   const totalPages      = images.length || 1;
-  const currentImageUrl = images[currentPage - 1] || null;
+  const currentImageUrl = bufferedUrls[currentPage - 1] ?? images[currentPage - 1] ?? null;
+  const currentRotation = pageRotations[currentPage] ?? 0;   // degrees: 0 | 90 | 180 | 270
 
-  const marksOptions = useMemo(() => {
-    const opts = [];
-    for (let i = 0; i <= maxMarks; i++) opts.push(i);
-    return opts;
-  }, [maxMarks]);
+  const marksOptions = useMemo(() =>
+    Array.from({ length: maxMarks + 1 }, (_, i) => i),
+  [maxMarks]);
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Fetch images on mount
-  // Backend: POST /images/get → { urls: { page_no: presigned_url } }
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Fetch images ─────────────────────────────────────────────────────────────
+  useEffect(() => { if (workbookId && questionNo) fetchImages(); }, [workbookId, questionNo]);
   useEffect(() => {
-    if (!workbookId || !questionNo) return;
-    fetchImages();
-  }, [workbookId, questionNo]);
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Fetch the question's own image on mount
-  // Backend: GET /question/image?paper_id=...&question_no=... → { url }
-  // ────────────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!paperId || !questionNo) {
-      setQuestionImageLoading(false);
-      return;
-    }
+    if (!paperId || !questionNo) { setQuestionImageLoading(false); return; }
     fetchQuestionImage();
   }, [paperId, questionNo]);
 
   const fetchQuestionImage = async () => {
-    setQuestionImageLoading(true);
-    setQuestionImageError('');
+    setQuestionImageLoading(true); setQuestionImageError('');
     try {
       const data = await api.getQuestionImage(paperId, questionNo);
       setQuestionImageUrl(data?.url || null);
     } catch (err) {
       setQuestionImageError(`Could not load question image: ${err.message}`);
       setQuestionImageUrl(null);
-    } finally {
-      setQuestionImageLoading(false);
-    }
+    } finally { setQuestionImageLoading(false); }
   };
 
   const fetchImages = async () => {
-    setImagesLoading(true);
-    setSubmitError('');
-    setImageLoadStatus({});
+    setImagesLoading(true); setSubmitError(''); setImageLoadStatus({});
     try {
-      // this zip's api.js method is getImages(), not getQuestionImages()
       const data = await api.getImages(workbookId, questionNo);
-
-      // data.urls is { "1": url, "2": url, ... } — sort by page number
-      if (data && data.urls) {
+      if (data?.urls) {
         const sorted = Object.entries(data.urls)
           .sort(([a], [b]) => Number(a) - Number(b))
           .map(([, url]) => url);
         setImages(sorted);
-
-        // If backend also gives us max_marks, use it
         if (data.max_marks) setMaxMarks(data.max_marks);
+        bufferAllPages(sorted);
         return sorted;
-      } else {
-        setImages([]);
-        return [];
       }
+      setImages([]); return [];
     } catch (err) {
       setSubmitError(`Could not load images: ${err.message}`);
-      setImages([]);
-      return [];
-    } finally {
-      setImagesLoading(false);
-    }
+      setImages([]); return [];
+    } finally { setImagesLoading(false); }
   };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Canvas helpers — save/restore per-page annotation layers
-  // ────────────────────────────────────────────────────────────────────────────
+  // Fetch all pages → Blob → object URL in parallel (no expiry after this)
+  const bufferAllPages = async (urls) => {
+    await Promise.all(urls.map(async (url, idx) => {
+      try {
+        const res  = await fetch(url);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        blobUrlsRef.current[idx] = blobUrl;
+        setBufferedUrls(prev => ({ ...prev, [idx]: blobUrl }));
+        setImageLoadStatus(prev => ({ ...prev, [idx]: 'loaded' }));
+      } catch {
+        setImageLoadStatus(prev => ({ ...prev, [idx]: 'error' }));
+      }
+    }));
+  };
+
+  // ── Rotation helpers ─────────────────────────────────────────────────────────
+  const rotatePage = (delta) => {
+    // Save annotations before rotating so they don't misalign
+    saveCurrentPageAnnotation(currentPage);
+    setPageRotations(prev => {
+      const current = prev[currentPage] ?? 0;
+      return { ...prev, [currentPage]: (current + delta + 360) % 360 };
+    });
+  };
+
+  // ── Canvas helpers ────────────────────────────────────────────────────────────
   const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    }
-    // Also clear the saved annotation for the current page, since
-    // "Clear Canvas" is meant to wipe that page's marks entirely.
+    const c = canvasRef.current;
+    if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
     delete pageAnnotations.current[currentPage];
   };
 
-  // Saves the current canvas's drawn content (not the underlying image,
-  // just the annotation layer) as a PNG data URL keyed by page number.
   const saveCurrentPageAnnotation = (pageNum) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const c = canvasRef.current;
+    if (!c) return;
     try {
-      pageAnnotations.current[pageNum] = canvas.toDataURL('image/png');
-    } catch (e) {
-      // toDataURL can throw if the canvas is tainted (e.g. CORS) — in that
-      // case we simply can't persist this page's annotation in-memory.
-      console.error('Could not save page annotation:', e);
+      pageAnnotations.current[pageNum] = {
+        dataUrl: c.toDataURL('image/png'),
+        rotation: pageRotations[pageNum] ?? 0, // rotation this snapshot was drawn under
+      };
     }
+    catch (e) { console.error('Could not save page annotation:', e); }
   };
 
-  // Redraws a previously-saved annotation layer onto the (already resized,
-  // freshly cleared) canvas for the page now being shown.
   const restorePageAnnotation = (pageNum) => {
-    const canvas = canvasRef.current;
+    const c     = canvasRef.current;
     const saved = pageAnnotations.current[pageNum];
-    if (!canvas || !saved) return;
-    const ctx = canvas.getContext('2d');
+    if (!c || !saved) return;
+    const ctx        = c.getContext('2d');
+    const targetRot  = pageRotations[pageNum] ?? 0;
+    const delta      = ((targetRot - saved.rotation) % 360 + 360) % 360;
     const layer = new Image();
     layer.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(layer, 0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, c.width, c.height);
+      if (delta === 0) {
+        // Same rotation as when saved — draw as-is.
+        ctx.drawImage(layer, 0, 0, c.width, c.height);
+      } else {
+        // Page has been rotated further since this snapshot was taken —
+        // spin the old strokes by the delta instead of stretching them,
+        // so they land back on the same physical spot on the page.
+        ctx.save();
+        ctx.translate(c.width / 2, c.height / 2);
+        ctx.rotate((delta * Math.PI) / 180);
+        ctx.drawImage(layer, -layer.naturalWidth / 2, -layer.naturalHeight / 2);
+        ctx.restore();
+      }
     };
-    layer.src = saved;
+    layer.src = saved.dataUrl;
   };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Canvas: resize to sit exactly over the image
-  // ────────────────────────────────────────────────────────────────────────────
   const resizeCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    const img    = imgRef.current;
-    if (!canvas || !img) return;
+    const c   = canvasRef.current;
+    const img = imgRef.current;
+    if (!c || !img) return;
 
-    // NOTE: setting canvas.width/height always clears its content — this is
-    // standard browser behavior, not a bug. Any previously-saved annotation
-    // for this page must be redrawn afterward (done in the effect below).
-    canvas.width  = img.naturalWidth  || 800;
-    canvas.height = img.naturalHeight || 600;
+    const nw = img.naturalWidth  || 800;
+    const nh = img.naturalHeight || 600;
+    const rotated90 = currentRotation === 90 || currentRotation === 270;
 
-    const imgRect    = img.getBoundingClientRect();
-    const container  = img.closest('.image-canvas-container');
-    const parentRect = container
-      ? container.getBoundingClientRect()
-      : canvas.parentElement.getBoundingClientRect();
+    // The canvas's pixel buffer is sized in DISPLAY (post-rotation) space —
+    // i.e. what the examiner actually sees — so a stroke lands exactly where
+    // the pointer is, and so the saved annotation lines up 1:1 with the
+    // rotated page when flattened into the final PDF (see
+    // flattenAndUploadAsPDF, which already assumes this convention).
+    c.width  = rotated90 ? nh : nw;
+    c.height = rotated90 ? nw : nh;
 
-    canvas.style.width  = `${imgRect.width}px`;
-    canvas.style.height = `${imgRect.height}px`;
-    canvas.style.top    = `${imgRect.top  - parentRect.top}px`;
-    canvas.style.left   = `${imgRect.left - parentRect.left}px`;
-  }, []);
+    // img already has `rotate(currentRotation)` applied via CSS, so its
+    // bounding rect is the final, post-rotation box. Overlay the canvas on
+    // that exact box — with NO rotation transform of its own — so the two
+    // stay perfectly aligned without double-rotating.
+    const ir = img.getBoundingClientRect();
+    const pr = (img.closest('.image-canvas-container') ?? c.parentElement).getBoundingClientRect();
+    c.style.width  = `${ir.width}px`;
+    c.style.height = `${ir.height}px`;
+    c.style.top    = `${ir.top  - pr.top}px`;
+    c.style.left   = `${ir.left - pr.left}px`;
+  }, [currentRotation]);
 
   useEffect(() => {
     resizeCanvas();
     restorePageAnnotation(currentPage);
-    window.addEventListener('resize', resizeCanvas);
     const img = imgRef.current;
-    const handleImgLoad = () => {
-      resizeCanvas();
-      restorePageAnnotation(currentPage);
-    };
-    if (img) img.addEventListener('load', handleImgLoad);
-    return () => {
-      window.removeEventListener('resize', resizeCanvas);
-      if (img) img.removeEventListener('load', handleImgLoad);
-    };
-  }, [resizeCanvas, showModelAnswer, currentPage]);
+    const onLoad = () => { resizeCanvas(); restorePageAnnotation(currentPage); };
+    img?.addEventListener('load', onLoad);
+    return () => img?.removeEventListener('load', onLoad);
+  }, [resizeCanvas, currentPage, currentImageUrl]);
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Canvas: drawing events
-  // ────────────────────────────────────────────────────────────────────────────
+  // Also resize when rotation changes (swaps width/height visually)
+  useEffect(() => {
+    setTimeout(() => { resizeCanvas(); restorePageAnnotation(currentPage); }, 50);
+  }, [currentRotation]);
+
+  // ── Drawing events ────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    const coords = (clientX, clientY) => {
-      const rect = canvas.getBoundingClientRect();
+    const coords = (cx, cy) => {
+      const r = canvas.getBoundingClientRect();
       return {
-        x: ((clientX - rect.left) / rect.width)  * canvas.width,
-        y: ((clientY - rect.top)  / rect.height) * canvas.height,
+        x: ((cx - r.left) / r.width)  * canvas.width,
+        y: ((cy - r.top)  / r.height) * canvas.height,
       };
     };
 
-    const drawStamp = (type, x, y) => {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = type === 'check' ? '#10b981' : '#ef4444';
-      ctx.font      = '70px sans-serif';
-      ctx.fillText(type === 'check' ? '✓' : '✖', x - 25, y + 25);
-      // Tool stays active after stamping, same as pen/highlight, so the
-      // examiner can place multiple ✓ / ✖ marks without reselecting it.
-    };
     const onUp = () => {
       isDrawing.current = false;
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     };
+
     const onDown = (e) => {
       e.preventDefault();
-      const cx = e.touches ? e.touches[0].clientX : e.clientX;
-      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      const cx = e.touches?.[0].clientX ?? e.clientX;
+      const cy = e.touches?.[0].clientY ?? e.clientY;
       const { x, y } = coords(cx, cy);
       lastPos.current = { x, y };
 
       if (drawingMode === 'check' || drawingMode === 'cross') {
-        drawStamp(drawingMode, x, y);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = drawingMode === 'check' ? '#10b981' : '#ef4444';
+        ctx.font      = '70px sans-serif';
+        ctx.fillText(drawingMode === 'check' ? '✓' : '✖', x - 25, y + 25);
         return;
       }
-      if (drawingMode === 'pen' || drawingMode === 'highlight' || drawingMode === 'eraser') {
+      if (['pen', 'highlight', 'eraser'].includes(drawingMode)) {
         isDrawing.current = true;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
+        ctx.beginPath(); ctx.moveTo(x, y);
       }
     };
 
     const onMove = (e) => {
       if (!isDrawing.current) return;
       e.preventDefault();
-      const cx = e.touches ? e.touches[0].clientX : e.clientX;
-      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      const cx = e.touches?.[0].clientX ?? e.clientX;
+      const cy = e.touches?.[0].clientY ?? e.clientY;
       const { x, y } = coords(cx, cy);
-        
+
       if (drawingMode === 'pen') {
         ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth   = 4;
-        ctx.lineCap = ctx.lineJoin = 'round';
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      
+        ctx.globalAlpha = 1; ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 4; ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.lineTo(x, y); ctx.stroke();
       } else if (drawingMode === 'highlight') {
-        // Draw segment-by-segment from lastPos so each stroke is one
-        // fresh path — this prevents globalAlpha from stacking up over
-        // a long drag and turning the highlight fully opaque.
         ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 0.15;
-        ctx.strokeStyle = '#FACC15';
-        ctx.lineWidth   = 30;
-        ctx.lineCap = ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.15; ctx.strokeStyle = '#FACC15';
+        ctx.lineWidth = 30; ctx.lineCap = ctx.lineJoin = 'round';
         ctx.beginPath();
         ctx.moveTo(lastPos.current.x, lastPos.current.y);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      
+        ctx.lineTo(x, y); ctx.stroke();
       } else if (drawingMode === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.globalAlpha = 1;
-        ctx.lineWidth   = 24;
+        ctx.globalAlpha = 1; ctx.lineWidth = eraserSizeRef.current;
         ctx.lineCap = ctx.lineJoin = 'round';
-        ctx.lineTo(x, y);
-        ctx.stroke();
+        ctx.lineTo(x, y); ctx.stroke();
       }
-    
       lastPos.current = { x, y };
     };
 
@@ -326,7 +367,6 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
     canvas.addEventListener('touchstart', onDown, { passive: false });
     canvas.addEventListener('touchmove',  onMove, { passive: false });
     canvas.addEventListener('touchend',   onUp);
-
     return () => {
       canvas.removeEventListener('mousedown',  onDown);
       canvas.removeEventListener('mousemove',  onMove);
@@ -338,179 +378,156 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
     };
   }, [drawingMode]);
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Page navigation
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Page navigation ───────────────────────────────────────────────────────────
   const goToPage = (n) => {
     if (n === currentPage) return;
     saveCurrentPageAnnotation(currentPage);
     setCurrentPage(n);
     setShowPagePreview(false);
-    // Restoration happens in the resize effect below, once the new page's
-    // image has loaded and the canvas has been resized to match it.
   };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Flatten + upload checked images
-  // For every page, draws the original answer image plus that page's saved
-  // annotation layer onto an offscreen canvas, exports it as a PNG blob, and
-  // uploads all pages together so the examiner's marks are actually saved
-  // (not just visible in the browser during this session).
-  // ────────────────────────────────────────────────────────────────────────────
-  const flattenAndUploadCheckedImages = async () => {
-    // Make sure the page currently on screen is saved before flattening.
+  // ── Flatten all pages → single multi-page PDF → upload ───────────────────────
+  // For every page (whether annotated or not):
+  //   1. Draw base image on offscreen canvas with rotation applied
+  //   2. Composite annotation layer on top (if any)
+  //   3. Add as a PDF page
+  // This ensures ALL answer sheet pages end up in one PDF file.
+  const flattenAndUploadAsPDF = async () => {
     saveCurrentPageAnnotation(currentPage);
 
-    const pageNumsWithContent = Object.keys(pageAnnotations.current).map(Number);
-    if (pageNumsWithContent.length === 0) {
-      // Nothing was annotated — nothing to upload. Not an error; the
-      // examiner may have only entered marks without drawing anything.
-      return;
-    }
+    if (images.length === 0) return;
 
-    // Presigned URLs expire after 60 seconds (backend URL_EXPIRY). By the
-    // time the examiner finishes marking and clicks submit, the ones
-    // already in `images` state are very likely stale — fetch fresh ones
-    // right now rather than reusing them.
-    const freshImages = await fetchImages();
-    const validPageNums = pageNumsWithContent.filter((n) => freshImages[n - 1]);
-    if (validPageNums.length === 0) return;
+    const JsPDF   = await getJsPDF();
+    const loadImg = (src) => new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
 
-    const loadImage = (src) =>
-      new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = src;
-      });
+    let pdf = null;
 
-    const blobs = [];
-    for (const pageNum of validPageNums) {
-      const baseUrl = freshImages[pageNum - 1];
-      const annotationDataUrl = pageAnnotations.current[pageNum];
-      if (!baseUrl || !annotationDataUrl) continue;
+    for (let i = 0; i < images.length; i++) {
+      const pageNum  = i + 1;
+      const blobUrl  = blobUrlsRef.current[i];
+      if (!blobUrl) continue;                         // page didn't buffer — skip
 
-      const baseImg = await loadImage(baseUrl);
-      const annotationImg = await loadImage(annotationDataUrl);
+      const rotation   = pageRotations[pageNum] ?? 0;
+      const annotation = pageAnnotations.current[pageNum] ?? null;
 
-      const offscreen = document.createElement('canvas');
-      offscreen.width = baseImg.naturalWidth;
-      offscreen.height = baseImg.naturalHeight;
-      const ctx = offscreen.getContext('2d');
-      ctx.drawImage(baseImg, 0, 0, offscreen.width, offscreen.height);
-      ctx.drawImage(annotationImg, 0, 0, offscreen.width, offscreen.height);
+      const baseImg = await loadImg(blobUrl);
+      const sw = baseImg.naturalWidth;
+      const sh = baseImg.naturalHeight;
 
-      const blob = await new Promise((resolve) => offscreen.toBlob(resolve, 'image/png'));
-      blobs.push({ pageNum, blob });
-    }
+      // After rotation, canvas dimensions may swap (90° / 270°)
+      const rotated90  = rotation === 90 || rotation === 270;
+      const outW = rotated90 ? sh : sw;
+      const outH = rotated90 ? sw : sh;
 
-    if (blobs.length === 0) return;
+      const off = document.createElement('canvas');
+      off.width  = outW;
+      off.height = outH;
+      const ctx  = off.getContext('2d');
 
-    await api.uploadCheckedImages(
-      workbookId,
-      questionNo,
-      blobs.map((b) => b.blob),
-      blobs.map((b) => b.pageNum),
-    );
-  };
+      // Apply rotation transform around centre, then draw base image
+      ctx.save();
+      ctx.translate(outW / 2, outH / 2);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.drawImage(baseImg, -sw / 2, -sh / 2, sw, sh);
+      ctx.restore();
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // SUBMIT — uploads checked (annotated) images, then calls POST /question/evaluate
-  // ────────────────────────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
-    // Guard: marks must be a valid number
-    if (currentMark < 0 || currentMark > maxMarks) {
-      setSubmitError(`Marks must be between 0 and ${maxMarks}.`);
-      return;
-    }
-
-    setSubmitting(true);
-    setSubmitError('');
-
-    try {
-      // Save annotations first. If this fails, we deliberately stop before
-      // evaluating — better to retry the whole submit than to record marks
-      // with no corresponding saved annotations.
-      try {
-        await flattenAndUploadCheckedImages();
-      } catch (uploadErr) {
-        throw new Error(`Could not save annotated images: ${uploadErr.message}`);
+      // Composite annotation layer on top. It's stored in the display space
+      // of whatever rotation was active when it was last saved
+      // (annotation.rotation) — normally this already equals the page's
+      // final `rotation`, but if it doesn't for any reason, rotate it into
+      // alignment rather than stretching it.
+      if (annotation) {
+        const annotImg = await loadImg(annotation.dataUrl);
+        const annotDelta = ((rotation - (annotation.rotation ?? 0)) % 360 + 360) % 360;
+        if (annotDelta === 0) {
+          // Already matches the page's final rotation — same size as outW×outH.
+          ctx.drawImage(annotImg, 0, 0, outW, outH);
+        } else {
+          ctx.save();
+          ctx.translate(outW / 2, outH / 2);
+          ctx.rotate((annotDelta * Math.PI) / 180);
+          ctx.drawImage(annotImg, -annotImg.naturalWidth / 2, -annotImg.naturalHeight / 2);
+          ctx.restore();
+        }
       }
 
-      const response = await api.evaluateQuestion(
-        workbookId,      // string  — "W-1234"
-        questionNo,      // number  — 1
-        currentMark,      // number  — 0..maxMarks
-        annotationText,   // examiner's typed comment
-        // mac_addr defaults to '12:12:12:12:12:12' inside api.evaluateQuestion()
-      );
+      const dataUrl = off.toDataURL('image/jpeg', 0.92);
+      const wPt = outW * 0.75;   // px → pt (72dpi)
+      const hPt = outH * 0.75;
 
-      // ── Success ─────────────────────────────────────────────────────────────
-      // Response: { message, workbook_id, question_no, marks, comment, submit_time }
-      console.log('Evaluation saved:', response);
-      setSubmitted(true);
-
-      // Return to dashboard after 2 seconds so the examiner sees the tick
-      setTimeout(() => {
-        if (onBack) onBack();
-      }, 2000);
-
-    } catch (err) {
-      // ── Error handling ───────────────────────────────────────────────────────
-      // 403 — not assigned to this question
-      // 409 — already evaluated
-      // 422 — marks out of range (caught above, but backend double-checks)
-      // 500 — database error
-      setSubmitError(err.message || 'Failed to submit evaluation. Please try again.');
-    } finally {
-      setSubmitting(false);
+      if (!pdf) {
+        pdf = new JsPDF({ orientation: wPt > hPt ? 'l' : 'p', unit: 'pt', format: [wPt, hPt] });
+      } else {
+        pdf.addPage([wPt, hPt], wPt > hPt ? 'l' : 'p');
+      }
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, wPt, hPt);
     }
+
+    if (!pdf) return;
+
+    const pdfBlob = pdf.output('blob');
+    // Upload as a single file — page index 1 so the backend stores it
+    await api.uploadCheckedImages(workbookId, questionNo, [pdfBlob], [1]);
   };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Success screen — shown for 2 seconds after submit before onBack() fires
-  // ────────────────────────────────────────────────────────────────────────────
-  if (submitted) {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-100">
-        <div className="text-center bg-white rounded-2xl shadow-xl p-12">
-          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Evaluation Submitted!</h2>
-          <p className="text-gray-500">
-            Workbook <span className="font-mono font-semibold">{workbookId}</span> —
-            Q{questionNo} — <span className="font-bold text-blue-600">{currentMark}/{maxMarks} marks</span>
-          </p>
-          <p className="text-sm text-gray-400 mt-3">Returning to dashboard...</p>
-        </div>
-      </div>
-    );
-  }
+  // ── Submit ────────────────────────────────────────────────────────────────────
+  const handleSubmit = async () => {
+    if (currentMark < 0 || currentMark > maxMarks) {
+      setSubmitError(`Marks must be between 0 and ${maxMarks}.`); return;
+    }
+    setSubmitting(true); setSubmitError('');
+    try {
+      try { await flattenAndUploadAsPDF(); }
+      catch (e) { throw new Error(`Could not save annotated PDF: ${e.message}`); }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Loading screen
-  // ────────────────────────────────────────────────────────────────────────────
-  if (imagesLoading) {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Loading answer sheet...</p>
-          <p className="text-sm text-gray-400 mt-1">
-            Workbook: {workbookId} · Q{questionNo}
-          </p>
-        </div>
-      </div>
-    );
-  }
+      const response = await api.evaluateQuestion(workbookId, questionNo, currentMark, annotationText);
+      console.log('Evaluation saved:', response);
+      setSubmitted(true);
+      setTimeout(() => { (onSubmitDone ?? onBack)?.(); }, 2000);
+    } catch (err) {
+      setSubmitError(err.message || 'Failed to submit evaluation. Please try again.');
+    } finally { setSubmitting(false); }
+  };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Main UI
-  // ────────────────────────────────────────────────────────────────────────────
+  const canvasCursor = makeCursor(drawingMode, eraserSize);
+
+  // ── Success ───────────────────────────────────────────────────────────────────
+  if (submitted) return (
+    <div className="flex items-center justify-center h-full bg-gray-100">
+      <div className="text-center bg-white rounded-2xl shadow-xl p-12">
+        <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Evaluation Submitted!</h2>
+        <p className="text-gray-500">
+          Workbook <span className="font-mono font-semibold">{workbookId}</span> —
+          Q{questionNo} — <span className="font-bold text-blue-600">{currentMark}/{maxMarks} marks</span>
+        </p>
+        <p className="text-sm text-gray-400 mt-3">Opening next workbook…</p>
+      </div>
+    </div>
+  );
+
+  // ── Loading ───────────────────────────────────────────────────────────────────
+  if (imagesLoading) return (
+    <div className="flex items-center justify-center h-full bg-gray-100">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+        <p className="text-gray-600">Loading answer sheet...</p>
+        <p className="text-sm text-gray-400 mt-1">Workbook: {workbookId} · Q{questionNo}</p>
+      </div>
+    </div>
+  );
+
+  // ── Main UI ───────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-1 h-full bg-gray-100 overflow-hidden p-2 md:p-4 font-sans">
 
-      {/* Error / success toasts */}
+      {/* Error toast */}
       {submitError && (
         <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg z-50 max-w-md shadow-lg">
           <div className="flex items-start gap-2">
@@ -524,47 +541,49 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
         </div>
       )}
 
-      {/* ── Main image area ── */}
+      {/* ── Left: image area ── */}
       <div className="flex-1 bg-white rounded-xl shadow-2xl flex flex-col relative overflow-hidden mr-4">
 
-        {/* Header */}
+        {/* Header bar */}
         <div className="flex-shrink-0 p-4 bg-blue-50 border-b border-blue-200 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {onBack && (
-              <button
-                onClick={onBack}
-                className="p-2 rounded-lg hover:bg-blue-100 text-blue-700 transition flex-shrink-0"
-                title="Back to dashboard"
-              >
+              <button onClick={onBack} className="p-2 rounded-lg hover:bg-blue-100 text-blue-700 transition flex-shrink-0">
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
             <div className="min-w-0">
-              <p className="text-xs text-blue-500 font-medium uppercase tracking-wide">
-                Paper: {paperId} · Q{questionNo}
-              </p>
-              <h4 className="text-sm font-bold text-blue-800 truncate">
-                Workbook: {workbookId}
-              </h4>
+              <p className="text-xs text-blue-500 font-medium uppercase tracking-wide">Paper: {paperId} · Q{questionNo}</p>
+              <h4 className="text-sm font-bold text-blue-800 truncate">Workbook: {workbookId}</h4>
             </div>
           </div>
 
-          <div className="flex gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* ── Rotation controls ── */}
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg px-2 py-1">
+              <button
+                onClick={() => rotatePage(-90)}
+                title="Rotate 90° counter-clockwise"
+                className="p-1.5 rounded hover:bg-white hover:shadow transition text-gray-600"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+              <span className="text-xs font-mono text-gray-500 w-8 text-center">{currentRotation}°</span>
+              <button
+                onClick={() => rotatePage(90)}
+                title="Rotate 90° clockwise"
+                className="p-1.5 rounded hover:bg-white hover:shadow transition text-gray-600"
+              >
+                <RotateCw className="w-4 h-4" />
+              </button>
+            </div>
+
             <button
-              onClick={() => setShowModelAnswer(!showModelAnswer)}
-              className={`py-2 px-3 flex items-center gap-1 font-semibold rounded-lg shadow transition text-sm
-                ${showModelAnswer ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
-            >
-              <BookOpen className="w-4 h-4" />
-              {showModelAnswer ? 'Hide Answer' : 'Model Answer'}
-            </button>
-            <button
-              onClick={() => setShowPagePreview(!showPagePreview)}
+              onClick={() => setShowPagePreview(s => !s)}
               className={`py-2 px-3 flex items-center gap-1 font-semibold rounded-lg shadow transition text-sm
                 ${showPagePreview ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
             >
-              <Scan className="w-4 h-4" />
-              Pages
+              <Scan className="w-4 h-4" /> Pages
             </button>
           </div>
         </div>
@@ -573,143 +592,129 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
         {showPagePreview && images.length > 0 && (
           <div className="flex-shrink-0 p-3 bg-gray-100 border-b border-gray-300 overflow-x-auto">
             <div className="inline-flex gap-3">
-              {images.map((url, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => goToPage(idx + 1)}
-                  className={`inline-flex flex-col items-center p-1 rounded-lg transition
-                    ${currentPage === idx + 1 ? 'ring-4 ring-blue-500 bg-white shadow-lg' : 'hover:bg-gray-200'}`}
-                >
-                  <img
-                    src={url}
-                    alt={`Page ${idx + 1}`}
-                    className="w-14 h-20 object-cover rounded border border-gray-300"
-                  />
-                  <span className="text-xs font-semibold mt-1 text-gray-600">P{idx + 1}</span>
-                </button>
-              ))}
+              {images.map((_, idx) => {
+                const rot = pageRotations[idx + 1] ?? 0;
+                return (
+                  <button key={idx} onClick={() => goToPage(idx + 1)}
+                    className={`inline-flex flex-col items-center p-1 rounded-lg transition
+                      ${currentPage === idx + 1 ? 'ring-4 ring-blue-500 bg-white shadow-lg' : 'hover:bg-gray-200'}`}
+                  >
+                    {bufferedUrls[idx]
+                      ? <img src={bufferedUrls[idx]} alt={`Page ${idx + 1}`}
+                          style={{ transform: `rotate(${rot}deg)`, transition: 'transform .2s' }}
+                          className="w-14 h-20 object-cover rounded border border-gray-300" />
+                      : <div className="w-14 h-20 rounded border border-gray-300 bg-gray-200 flex items-center justify-center">
+                          <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                    }
+                    <span className="text-xs font-semibold mt-1 text-gray-600">P{idx + 1}</span>
+                    {rot !== 0 && <span className="text-xs text-blue-500">{rot}°</span>}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Question + Answer — one shared scroll region, single scrollbar */}
+        {/* Scroll region */}
         <div className="flex-1 overflow-auto bg-gray-50">
 
-          {/* Question image — shown above the answer, view-only, no annotation */}
+          {/* Question image */}
           {(questionImageUrl || questionImageLoading || questionImageError) && (
-            <div className="px-4 pt-4 flex-shrink-0">
+            <div className="px-4 pt-4">
               <div className="bg-white rounded-lg border border-gray-300 shadow-sm p-3">
                 <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Question</h4>
-                {questionImageLoading ? (
-                  <div className="flex items-center justify-center h-24 text-gray-400 text-sm">
-                    Loading question…
-                  </div>
-                ) : questionImageError ? (
-                  <div className="flex items-center justify-between text-sm text-red-500">
-                    <span>{questionImageError}</span>
-                    <button
-                      onClick={fetchQuestionImage}
-                      className="ml-3 px-3 py-1 bg-red-50 border border-red-300 rounded text-red-600 hover:bg-red-100"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ) : questionImageUrl ? (
-                  <img
-                    src={questionImageUrl}
-                    alt={`Question ${questionNo}`}
-                    className="max-h-64 mx-auto object-contain rounded border border-gray-200"
-                  />
-                ) : null}
+                {questionImageLoading
+                  ? <div className="flex items-center justify-center h-24 text-gray-400 text-sm">Loading question…</div>
+                  : questionImageError
+                  ? <div className="flex items-center justify-between text-sm text-red-500">
+                      <span>{questionImageError}</span>
+                      <button onClick={fetchQuestionImage} className="ml-3 px-3 py-1 bg-red-50 border border-red-300 rounded text-red-600 hover:bg-red-100">Retry</button>
+                    </div>
+                  : questionImageUrl
+                  ? <img src={questionImageUrl} alt={`Question ${questionNo}`} className="max-h-64 mx-auto object-contain rounded border border-gray-200" />
+                  : null}
               </div>
             </div>
           )}
 
-          {/* Answer image display */}
-          <div className="p-4 relative flex items-center justify-center min-h-[60vh]">
-          {images.length === 0 ? (
-            <div className="text-center text-gray-500">
-              <AlertCircle className="w-14 h-14 mx-auto mb-3 opacity-40" />
-              <p className="text-lg font-semibold">No images found</p>
-              <p className="text-sm mt-1 text-gray-400">
-                Workbook: {workbookId} · Q{questionNo}
-              </p>
-              <button
-                onClick={fetchImages}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-              >
-                Retry
-              </button>
-            </div>
-          ) : currentImageUrl ? (
-            <div className="relative max-w-full max-h-full image-canvas-container">
-              <img
-                ref={imgRef}
-                src={currentImageUrl}
-                alt={`Answer sheet page ${currentPage}`}
-                className="max-h-full max-w-full object-contain rounded-lg border border-gray-300 shadow-md"
-                onLoad={() => setImageLoadStatus(prev => ({ ...prev, [currentPage - 1]: 'loaded' }))}
-                onError={() => setImageLoadStatus(prev => ({ ...prev, [currentPage - 1]: 'error' }))}
-              />
-
-              {/* Loading overlay */}
-              {imageLoadStatus[currentPage - 1] === undefined && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-200/75 rounded-lg">
-                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-                </div>
-              )}
-
-              {/* Error overlay */}
-              {imageLoadStatus[currentPage - 1] === 'error' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-red-100/90 rounded-lg">
-                  <div className="text-center p-4">
-                    <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-2" />
-                    <p className="font-semibold text-red-800">Image failed to load</p>
-                    <p className="text-xs text-red-500 mt-1">Presigned URL may have expired (60s limit)</p>
-                    <button
-                      onClick={fetchImages}
-                      className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                    >
-                      Reload Images
-                    </button>
+          {/* Answer image + canvas.
+              justify-[safe_center] / items-[safe_center]: when the rotated
+              image is bigger than the viewport, plain `justify-center` /
+              `items-center` still centers it — which overflows equally on
+              both sides, and since a scroll container can't scroll to a
+              negative position, the left/top overflow becomes permanently
+              unreachable (this is what was cutting off the left side of
+              rotated pages). "safe center" falls back to start-alignment
+              whenever the content doesn't fit, so the whole image stays
+              reachable by scrolling; it still centers normally when it fits. */}
+          <div className="p-4 relative flex items-[safe_center] justify-[safe_center] min-h-[60vh]">
+            {images.length === 0 ? (
+              <div className="text-center text-gray-500">
+                <AlertCircle className="w-14 h-14 mx-auto mb-3 opacity-40" />
+                <p className="text-lg font-semibold">No images found</p>
+                <p className="text-sm mt-1 text-gray-400">Workbook: {workbookId} · Q{questionNo}</p>
+                <button onClick={fetchImages} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">Retry</button>
+              </div>
+            ) : currentImageUrl ? (
+              <div className="relative max-w-full max-h-full image-canvas-container">
+                {/* CSS rotation — visual only; canvas coordinates adjust via resizeCanvas */}
+                <img
+                  ref={imgRef}
+                  src={currentImageUrl}
+                  alt={`Answer sheet page ${currentPage}`}
+                  style={{
+                    transform: `rotate(${currentRotation}deg)`,
+                    transition: 'transform 0.25s ease',
+                  }}
+                  className="max-h-full max-w-full object-contain rounded-lg border border-gray-300 shadow-md"
+                  onLoad={()  => setImageLoadStatus(p => ({ ...p, [currentPage - 1]: 'loaded' }))}
+                  onError={() => setImageLoadStatus(p => ({ ...p, [currentPage - 1]: 'error' }))}
+                />
+                {imageLoadStatus[currentPage - 1] === undefined && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-200/75 rounded-lg">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
                   </div>
-                </div>
-              )}
-
-              {/* Drawing canvas */}
-              <canvas
-                ref={canvasRef}
-                className="absolute cursor-crosshair"
-                style={{ backgroundColor: 'transparent' }}
-              />
-            </div>
-          ) : null}
+                )}
+                {imageLoadStatus[currentPage - 1] === 'error' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-red-100/90 rounded-lg">
+                    <div className="text-center p-4">
+                      <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-2" />
+                      <p className="font-semibold text-red-800">Image failed to load</p>
+                      <button onClick={fetchImages} className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Reload Images</button>
+                    </div>
+                  </div>
+                )}
+                {/* Drawing canvas — buffer is sized in rotated/display space
+                    (see resizeCanvas), so it is positioned to exactly overlay
+                    the already-rotated image with NO transform of its own. */}
+                <canvas
+                  ref={canvasRef}
+                  className="absolute"
+                  style={{
+                    backgroundColor: 'transparent',
+                    cursor: canvasCursor,
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
 
-        {/* Navigation bar */}
+        {/* Nav bar */}
         <div className="flex-shrink-0 bg-blue-600 text-white text-sm font-semibold p-2 px-4 flex justify-between items-center rounded-b-xl">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => goToPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
-            >
+            <button onClick={() => goToPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1}
+              className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition">
               ← Previous
             </button>
             <span>Page {currentPage} / {totalPages}</span>
-            <button
-              onClick={() => goToPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
-            >
+            <button onClick={() => goToPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages}
+              className="px-3 py-1 rounded text-xs bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed transition">
               Next →
             </button>
           </div>
-          <span>
-            Marks: <span className="text-xl font-extrabold">{formatMark(currentMark)}</span>
-            <span className="text-blue-200"> / {formatMark(maxMarks)}</span>
-          </span>
+          <span>Marks: <span className="text-xl font-extrabold">{formatMark(currentMark)}</span><span className="text-blue-200"> / {formatMark(maxMarks)}</span></span>
         </div>
       </div>
 
@@ -720,26 +725,52 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
         <div>
           <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-2 mb-3">Annotations</h3>
           <div className="grid grid-cols-2 gap-2">
-            <AnnotationButton type="check"     icon={Check}   colorClass="text-green-600 border-green-300"   label="Correct"   active={drawingMode === 'check'}     onClick={() => setDrawingMode('check')} />
-            <AnnotationButton type="cross"     icon={X}       colorClass="text-red-600 border-red-300"       label="Wrong"     active={drawingMode === 'cross'}     onClick={() => setDrawingMode('cross')} />
-            <AnnotationButton type="pen"       icon={Pen}     colorClass="text-red-600 border-red-300"       label="Pen"       active={drawingMode === 'pen'}       onClick={() => setDrawingMode('pen')} />
-            <AnnotationButton type="highlight" icon={Palette} colorClass="text-yellow-600 border-yellow-300" label="Highlight" active={drawingMode === 'highlight'} onClick={() => setDrawingMode('highlight')} />
-            <AnnotationButton type="eraser"    icon={Scan}    colorClass="text-gray-600 border-gray-300"     label="Eraser"    active={drawingMode === 'eraser'}    onClick={() => setDrawingMode('eraser')} />
+            <AnnotationButton icon={Check}   colorClass="text-green-600 border-green-300"   label="Correct"   active={drawingMode === 'check'}     onClick={() => setDrawingMode('check')} />
+            <AnnotationButton icon={X}       colorClass="text-red-600 border-red-300"       label="Wrong"     active={drawingMode === 'cross'}     onClick={() => setDrawingMode('cross')} />
+            <AnnotationButton icon={Pen}     colorClass="text-red-600 border-red-300"       label="Pen"       active={drawingMode === 'pen'}       onClick={() => setDrawingMode('pen')} />
+            <AnnotationButton icon={Palette} colorClass="text-yellow-600 border-yellow-300" label="Highlight" active={drawingMode === 'highlight'} onClick={() => setDrawingMode('highlight')} />
+            <AnnotationButton icon={Eraser}  colorClass="text-gray-600 border-gray-300"     label="Eraser"    active={drawingMode === 'eraser'}    onClick={() => setDrawingMode('eraser')} />
           </div>
-          <button
-            onClick={() => setDrawingMode(null)}
-            className="w-full py-2 mt-2 flex items-center justify-center rounded-lg border-2 border-gray-300 bg-gray-100 hover:bg-gray-200 transition"
-          >
-            <X className="w-4 h-4 mr-1 text-gray-600" />
-            <span className="text-xs font-semibold text-gray-600">Clear Tool</span>
+
+          {drawingMode === 'eraser' && (
+            <div className="mt-3 px-1">
+              <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                <span>Eraser size</span>
+                <span className="font-semibold text-gray-700">{eraserSize}px</span>
+              </div>
+              <input type="range" min={8} max={120} step={4} value={eraserSize}
+                onChange={e => setEraserSize(Number(e.target.value))} className="w-full accent-gray-500" />
+              <div className="flex justify-between text-xs text-gray-400 mt-0.5"><span>Small</span><span>Large</span></div>
+            </div>
+          )}
+
+          <button onClick={() => setDrawingMode(null)}
+            className="w-full py-2 mt-2 flex items-center justify-center rounded-lg border-2 border-gray-300 bg-gray-100 hover:bg-gray-200 transition">
+            <X className="w-4 h-4 mr-1 text-gray-600" /><span className="text-xs font-semibold text-gray-600">Clear Tool</span>
           </button>
-          <button
-            onClick={clearCanvas}
-            className="w-full py-2 mt-2 flex items-center justify-center rounded-lg border-2 border-red-400 bg-red-50 text-red-700 hover:bg-red-100 transition"
-          >
-            <Scan className="w-4 h-4 mr-1" />
-            <span className="text-xs font-semibold">Clear Canvas</span>
+          <button onClick={clearCanvas}
+            className="w-full py-2 mt-2 flex items-center justify-center rounded-lg border-2 border-red-400 bg-red-50 text-red-700 hover:bg-red-100 transition">
+            <Eraser className="w-4 h-4 mr-1" /><span className="text-xs font-semibold">Clear Canvas</span>
           </button>
+        </div>
+
+        <div className="border-t" />
+
+        {/* Rotation shortcut in sidebar too */}
+        <div>
+          <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-2 mb-3">Rotate Page</h3>
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={() => rotatePage(-90)}
+              className="flex-1 py-2 flex items-center justify-center gap-1 rounded-lg border-2 border-gray-300 bg-gray-50 hover:bg-gray-100 transition text-gray-700">
+              <RotateCcw className="w-4 h-4" /><span className="text-xs font-semibold">CCW</span>
+            </button>
+            <span className="text-xs font-mono text-gray-400">{currentRotation}°</span>
+            <button onClick={() => rotatePage(90)}
+              className="flex-1 py-2 flex items-center justify-center gap-1 rounded-lg border-2 border-gray-300 bg-gray-50 hover:bg-gray-100 transition text-gray-700">
+              <RotateCw className="w-4 h-4" /><span className="text-xs font-semibold">CW</span>
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-1 text-center">Rotation is baked into the saved PDF</p>
         </div>
 
         <div className="border-t" />
@@ -749,28 +780,16 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
           <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-2 mb-3">Assign Marks</h3>
           <div className="grid grid-cols-4 gap-1.5">
             {marksOptions.map(m => (
-              <button
-                key={m}
-                onClick={() => setCurrentMark(m)}
+              <button key={m} onClick={() => setCurrentMark(m)}
                 className={`h-9 text-sm font-bold rounded-lg border-2 transition
-                  ${currentMark === m
-                    ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400'
-                    : 'bg-white text-gray-800 border-gray-300 hover:bg-blue-50'}`}
-              >
+                  ${currentMark === m ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400' : 'bg-white text-gray-800 border-gray-300 hover:bg-blue-50'}`}>
                 {m}
               </button>
             ))}
           </div>
-          {/* Manual input for decimal marks */}
-          <input
-            type="number"
-            step="0.5"
-            min="0"
-            max={maxMarks}
-            value={currentMark}
+          <input type="number" step="0.5" min="0" max={maxMarks} value={currentMark}
             onChange={e => setCurrentMark(Math.min(maxMarks, Math.max(0, parseFloat(e.target.value) || 0)))}
-            className="w-full text-center p-2 mt-3 border border-gray-300 rounded-lg text-lg font-bold focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-          />
+            className="w-full text-center p-2 mt-3 border border-gray-300 rounded-lg text-lg font-bold focus:border-blue-500 focus:ring-2 focus:ring-blue-200" />
           <p className="text-xs text-gray-400 text-center mt-1">Max: {formatMark(maxMarks)}</p>
         </div>
 
@@ -779,29 +798,20 @@ export default function EvaluationPage({ workbookId, questionNo, paperId, userDa
         {/* Comment */}
         <div>
           <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-2 mb-3">Comment</h3>
-          <textarea
-            className="w-full h-20 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-300 resize-none"
-            placeholder="Optional notes..."
-            value={annotationText}
-            onChange={e => setAnnotationText(e.target.value)}
-          />
+          <textarea className="w-full h-20 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-300 resize-none"
+            placeholder="Optional notes..." value={annotationText} onChange={e => setAnnotationText(e.target.value)} />
         </div>
 
         <div className="border-t" />
 
         {/* Submit */}
         <div className="space-y-2">
-          <button
-            onClick={handleSubmit}
-            disabled={submitting || images.length === 0}
+          <button onClick={handleSubmit} disabled={submitting || images.length === 0}
             className={`w-full py-3 bg-blue-600 text-white font-extrabold rounded-lg shadow-lg hover:bg-blue-700 transition
-              ${(submitting || images.length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {submitting ? 'Submitting...' : `Submit — ${formatMark(currentMark)} / ${formatMark(maxMarks)}`}
+              ${(submitting || images.length === 0) ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            {submitting ? 'Saving PDF & submitting…' : `Submit — ${formatMark(currentMark)} / ${formatMark(maxMarks)}`}
           </button>
-          {images.length === 0 && (
-            <p className="text-xs text-center text-gray-400">Load images before submitting</p>
-          )}
+          {images.length === 0 && <p className="text-xs text-center text-gray-400">Load images before submitting</p>}
         </div>
 
       </div>
